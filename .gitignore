@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Env / secrets
+**/.env
+**/.env.*
+!**/.env.example
+**/config/*.json
+!**/config/*.example.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# App folders
+app/
+frontend/
+admin/
