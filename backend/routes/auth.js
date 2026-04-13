@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 const otpGenerator = require("otp-generator");
 const User = require("../models/User");
+const redisClient = require("../config/redis");
 const { scheduleInitialActivity } = require("../services/botInteractionService");
 
 const router = express.Router();
@@ -47,70 +48,70 @@ const sendOtpEmail = async (email, otp) => {
     await transporter.sendMail(mailOptions);
 };
 
-// ─── REGISTER ───────────────────────────────────────────────
+// ─── REGISTER (Send OTP Only) ──────────────────────────────
 router.post("/register", async (req, res) => {
     try {
-        const { name, email, password } = req.body;
-        if (!name || !email || !password)
-            return res.status(400).json({ message: "All fields are required", success: false });
+        const { email } = req.body;
+        if (!email)
+            return res.status(400).json({ message: "Email is required", success: false });
 
         const existingUser = await User.findOne({ email });
         if (existingUser && existingUser.isVerified)
             return res.status(400).json({ message: "User already exists", success: false });
 
-        const hashedPassword = await bcrypt.hash(password, 10);
         const otp = otpGenerator.generate(6, { upperCaseAlphabets: false, lowerCaseAlphabets: false, specialChars: false });
-        const otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
-
-        // TRANSACTIONAL APPROACH: Send email BEFORE saving user to DB
-        // This prevents polluting the DB with unverified accounts that can't be registered again if email fails.
+        
         try {
             await sendOtpEmail(email, otp);
-            console.log(`OTP email sent successfully to ${email}`);
+            // Store OTP in Redis for 5 minutes
+            await redisClient.setEx(`otp:${email}`, 300, otp);
+            console.log(`OTP email sent and stored in Redis for ${email}`);
         } catch (emailError) {
             console.error("CRITICAL: Failed to send OTP during registration:", emailError);
             return res.status(500).json({
-                message: "Email service is temporarily unavailable. Please try again in a few minutes.",
-                success: false,
-                details: emailError.message
+                message: "Email service is temporarily unavailable.",
+                success: false
             });
-        }
-
-        if (existingUser && !existingUser.isVerified) {
-            existingUser.name = name;
-            existingUser.password = hashedPassword;
-            existingUser.otp = otp;
-            existingUser.otpExpiry = otpExpiry;
-            await existingUser.save();
-        } else {
-            await User.create({ name, email, password: hashedPassword, otp, otpExpiry });
         }
 
         res.status(200).json({ message: "OTP sent to your email", success: true });
     } catch (error) {
-        console.error("Register database error:", error);
+        console.error("Register error:", error);
         res.status(500).json({ message: "Server error", success: false });
     }
 });
 
-// ─── VERIFY OTP ─────────────────────────────────────────────
+// ─── VERIFY OTP & REGISTER ─────────────────────────────────
 router.post("/verify-otp", async (req, res) => {
     try {
-        const { email, otp } = req.body;
-        const user = await User.findOne({ email });
-        if (!user) return res.status(400).json({ message: "User not found", success: false });
-        if (user.otp !== otp) return res.status(400).json({ message: "Invalid OTP", success: false });
-        if (user.otpExpiry < new Date()) return res.status(400).json({ message: "OTP has expired", success: false });
+        const { name, email, password, otp } = req.body;
+        if (!name || !email || !password || !otp) {
+            return res.status(400).json({ message: "Missing required fields", success: false });
+        }
 
-        user.isVerified = true;
-        user.otp = "";
-        user.otpExpiry = null;
+        const storedOtp = await redisClient.get(`otp:${email}`);
+        if (!storedOtp) return res.status(400).json({ message: "OTP has expired or not found", success: false });
+        if (storedOtp !== otp) return res.status(400).json({ message: "Invalid OTP", success: false });
 
-        await user.save();
+        // OTP is valid, now create the user
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
+        // Clean up unverified user if exists (to prevent unique constraint error on email)
+        await User.deleteOne({ email, isVerified: false });
+
+        const user = await User.create({
+            name,
+            email,
+            password: hashedPassword,
+            isVerified: true
+        });
+
+        // Remove OTP from Redis
+        await redisClient.del(`otp:${email}`);
 
         const token = generateToken(user._id);
         res.status(200).json({
-            message: "Email verified successfully",
+            message: "Registration successful",
             success: true,
             token,
             user: { id: user._id, name: user.name, email: user.email, isProfileComplete: user.isProfileComplete },
