@@ -9,13 +9,13 @@ function getEffectiveTier(user) {
     const exp = user.subscriptionExpiresAt ? new Date(user.subscriptionExpiresAt) : null;
     if (!exp || exp.getTime() <= Date.now()) return "normal";
     const t = user.accountType;
-    if (t === "platinum" || t === "gold") return t;
+    if (t === "gold") return t;
     return "normal";
 }
 
 function hasPremiumAccess(user) {
     const tier = getEffectiveTier(user);
-    return tier === "gold" || tier === "platinum";
+    return tier === "gold";
 }
 
 async function ensureUsageDay(user) {
@@ -51,10 +51,9 @@ function canSendMessage(user, receiverId) {
         return {
             ok: false,
             code: "SUBSCRIPTION_REQUIRED",
-            message: "Messaging requires Gold or Platinum. Upgrade to chat.",
+            message: "Messaging requires Gold. Upgrade to chat.",
         };
     }
-    if (tier === "platinum") return { ok: true };
 
     const rid = String(receiverId);
     const raw = user.usageDaily?.messageRecipientIds || [];
@@ -65,7 +64,7 @@ function canSendMessage(user, receiverId) {
             ok: false,
             code: "GOLD_MESSAGE_LIMIT",
             message:
-                "Gold allows messaging up to 50 different people per day. Upgrade to Platinum for unlimited messaging.",
+                "Gold allows messaging up to 50 different people per day.",
         };
     }
     return { ok: true };

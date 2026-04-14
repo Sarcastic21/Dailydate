@@ -7,6 +7,8 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const compression = require("compression");
+const rateLimit = require("express-rate-limit");
+const morgan = require("morgan");
 
 // Routes
 const authRoutes = require("./routes/auth");
@@ -43,6 +45,21 @@ app.use(cors());
 app.use(compression());
 app.use(express.json());
 
+// Rate limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 1000, // limit each IP to 1000 requests per windowMs
+    message: {
+        error: "Too many requests from this IP, please try again later."
+    },
+    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
+app.use(limiter);
+
+// Morgan logging
+app.use(morgan("combined"));
+
 // MongoDB
 
 
@@ -60,6 +77,7 @@ app.use("/api", fcmRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/payment", require("./routes/payment"));
 app.use("/api/admin", adminRoutes);
+app.use("/api/pricing", require("./routes/pricing"));
 
 app.get("/health", (req, res) => res.json({ status: "OK" }));
 
@@ -192,7 +210,7 @@ io.on("connection", (socket) => {
             const preview = String(content || "").slice(0, 200);
             const receiverDoc = await User.findById(receiverId).select("accountType subscriptionExpiresAt").lean();
             const receiverTier = getEffectiveTier(receiverDoc);
-            const isPremiumReceiver = receiverTier === "gold" || receiverTier === "platinum";
+            const isPremiumReceiver = receiverTier === "gold";
 
             const senderName = senderDoc?.name || "Someone";
             const senderPhoto = senderDoc?.profilePhotos?.[0]?.url;
@@ -308,6 +326,71 @@ io.on("connection", (socket) => {
 // Export io so it can be used in routes for notifications
 app.set("io", io);
 app.set("redisClient", redisClient);
+
+// 404 handler for undefined routes
+app.use((req, res) => {
+    res.status(404).json({
+        error: "Route not found",
+        path: req.originalUrl,
+        method: req.method
+    });
+});
+
+// Global error handling middleware
+app.use((err, req, res, next) => {
+    console.error("Error:", err.stack);
+
+    // Mongoose validation error
+    if (err.name === 'ValidationError') {
+        return res.status(400).json({
+            error: "Validation Error",
+            details: Object.values(err.errors).map(e => e.message)
+        });
+    }
+
+    // Mongoose duplicate key error
+    if (err.code === 11000) {
+        return res.status(409).json({
+            error: "Duplicate entry",
+            field: Object.keys(err.keyPattern)[0]
+        });
+    }
+
+    // JWT errors
+    if (err.name === 'JsonWebTokenError') {
+        return res.status(401).json({
+            error: "Invalid token"
+        });
+    }
+
+    if (err.name === 'TokenExpiredError') {
+        return res.status(401).json({
+            error: "Token expired"
+        });
+    }
+
+    // Default error
+    res.status(err.status || 500).json({
+        error: err.message || "Internal server error",
+        ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    });
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+    console.error('UNCAUGHT EXCEPTION! 💥 Shutting down...');
+    console.error(err.name, err.message);
+    process.exit(1);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err) => {
+    console.error('UNHANDLED REJECTION! 💥 Shutting down...');
+    console.error(err.name, err.message);
+    server.close(() => {
+        process.exit(1);
+    });
+});
 
 const PORT = process.env.PORT || 5000;
 // Listen on all interfaces so physical phones on LAN can reach your machine

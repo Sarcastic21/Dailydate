@@ -39,7 +39,7 @@ const userSchema = new mongoose.Schema({
     // ── Account & subscription ──────────────────────────
     userType: { type: String, enum: ["real", "bot"], default: "real" },
     status: { type: String, enum: ["married", "single", "divorced", ""], default: "" },
-    accountType: { type: String, enum: ["normal", "gold", "platinum"], default: "normal" },
+    accountType: { type: String, enum: ["normal", "gold"], default: "normal" },
     /** Active until this instant; messaging/likes limits use subscription + usageDaily */
     subscriptionExpiresAt: { type: Date, default: null },
     /** Resets daily (UTC date string YYYY-MM-DD) */

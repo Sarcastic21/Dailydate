@@ -196,7 +196,7 @@ const generateRandomData = (gender, selectedState) => {
             openToLongDistance: longDistanceOptions[Math.floor(Math.random() * longDistanceOptions.length)],
         },
         status: ["married", "single", "divorced", ""][Math.floor(Math.random() * 4)],
-        accountType: Math.random() > 0.4 ? (Math.random() > 0.75 ? "platinum" : "gold") : "normal",
+        accountType: Math.random() > 0.4 ? "gold" : "normal",
         isProfileComplete: true,
         profileCompletionStep: 5
     };
@@ -481,16 +481,16 @@ router.post("/insert-bot-users", async (req, res) => {
             const VALID_INTENTIONS = ["Marriage", "Serious Relationship", "Dating", "Casual", "Friendship", "Not Sure Yet", ""];
             const VALID_LOOKING_FOR = ["male", "female", "everyone", ""];
             const VALID_STATUS = ["married", "single", "divorced", ""];
-            const VALID_ACCOUNT_TYPES = ["normal", "gold", "platinum"];
+            const VALID_ACCOUNT_TYPES = ["normal", "gold"];
 
             const sanitizedIntention = VALID_INTENTIONS.includes(userData.intention) ? userData.intention : "";
             const sanitizedLookingFor = VALID_LOOKING_FOR.includes(userData.lookingFor) ? userData.lookingFor : "";
 
             let sanitizedAccountType = VALID_ACCOUNT_TYPES.includes(userData.accountType) ? userData.accountType : "gold";
 
-            // Normal bots cannot interact, natively upgrade them to Gold or Platinum
+            // Normal bots cannot interact, upgrade them to Gold
             if (sanitizedAccountType === "normal" || userData.accountType === "random") {
-                sanitizedAccountType = Math.random() > 0.5 ? "gold" : "platinum";
+                sanitizedAccountType = "gold";
             }
 
             // Generate bio if not provided
@@ -693,9 +693,7 @@ router.get("/analytics", async (req, res) => {
             onlineBots,
             premiumUsers,
             goldBots,
-            platinumBots,
             goldUsers,
-            platinumUsers,
             maleUsers,
             femaleUsers,
             usersByState,
@@ -708,9 +706,7 @@ router.get("/analytics", async (req, res) => {
             User.countDocuments({ userType: "bot", isOnline: true }),
             User.countDocuments({ ...activeRealUserQuery, accountType: { $ne: "normal" } }),
             User.countDocuments({ userType: "bot", accountType: "gold" }),
-            User.countDocuments({ userType: "bot", accountType: "platinum" }),
             User.countDocuments({ ...activeRealUserQuery, accountType: "gold" }),
-            User.countDocuments({ ...activeRealUserQuery, accountType: "platinum" }),
             User.countDocuments({ ...activeRealUserQuery, gender: "male" }),
             User.countDocuments({ ...activeRealUserQuery, gender: "female" }),
             User.aggregate([
@@ -742,9 +738,7 @@ router.get("/analytics", async (req, res) => {
                 onlineBots,
                 premiumUsers,
                 goldBots,
-                platinumBots,
                 goldUsers,
-                platinumUsers,
                 maleUsers,
                 femaleUsers,
                 newUsersToday,

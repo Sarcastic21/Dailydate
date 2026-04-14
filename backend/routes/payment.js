@@ -16,11 +16,12 @@ function getRazorpay() {
     return new Razorpay({ key_id, key_secret });
 }
 
-router.get("/plans", auth, (req, res) => {
+router.get("/plans", auth, async (req, res) => {
     try {
+        const plans = await listPlansForClient();
         res.json({
             success: true,
-            plans: listPlansForClient(),
+            plans,
             keyId: process.env.RAZORPAY_KEY_ID || "",
         });
     } catch (err) {
@@ -31,7 +32,7 @@ router.get("/plans", auth, (req, res) => {
 router.post("/create-order", auth, async (req, res) => {
     try {
         const { planId } = req.body;
-        const plan = getPlan(planId);
+        const plan = await getPlan(planId);
         if (!plan) {
             return res.status(400).json({ success: false, message: "Invalid plan" });
         }
@@ -89,7 +90,7 @@ router.post("/verify", auth, async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing payment fields" });
         }
 
-        const plan = getPlan(planId);
+        const plan = await getPlan(planId);
         if (!plan) {
             return res.status(400).json({ success: false, message: "Invalid plan" });
         }
