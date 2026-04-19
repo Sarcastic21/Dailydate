@@ -17,7 +17,8 @@ const imagekit = new ImageKit({
 router.get("/me", auth, async (req, res) => {
     try {
         const user = await User.findById(req.userId)
-            .select("-password -otp -otpExpiry -fcmToken -usageDaily -blockedUsers -registrationStep -__v -phone -notificationPreferences -personality -lifestyle -physical -beliefs")
+            .select("-password -otp -otpExpiry -fcmToken -usageDaily -blockedUsers -registrationStep -__v -phone -notificationPreferences")
+
             .lean();
         if (!user) return res.status(404).json({ message: "Not found", success: false });
         const full = await User.findById(req.userId);
