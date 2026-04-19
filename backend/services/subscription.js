@@ -8,8 +8,7 @@ function getEffectiveTier(user) {
     if (!user) return "normal";
     const exp = user.subscriptionExpiresAt ? new Date(user.subscriptionExpiresAt) : null;
     if (!exp || exp.getTime() <= Date.now()) return "normal";
-    const t = user.accountType;
-    if (t === "gold") return t;
+    if (user.accountType === "gold") return "gold";
     return "normal";
 }
 

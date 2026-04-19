@@ -7,6 +7,8 @@ const Report = require("../models/Report");
 const auth = require("../middleware/auth");
 const { hasPremiumAccess } = require("../services/subscription");
 const User = require("../models/User");
+const Notification = require("../models/Notification");
+const { emitToUserSockets } = require("../utils/socketEmit");
 
 const router = express.Router();
 
@@ -142,11 +144,21 @@ router.get("/conversations", auth, async (req, res) => {
 
 router.get("/unread-total", auth, async (req, res) => {
     try {
+        const me = await User.findById(req.userId).select("blockedUsers");
+        const blockedByMe = me?.blockedUsers || [];
+
+        // Also exclude users who have blocked me
+        const blockedByThem = await User.find({ blockedUsers: req.userId }).select("_id").lean();
+        const theyBlockedMe = blockedByThem.map(u => u._id);
+
+        const allExclusions = [...blockedByMe, ...theyBlockedMe];
+
         const result = await Message.aggregate([
             {
                 $match: {
                     receiverId: new mongoose.Types.ObjectId(String(req.userId)),
-                    "readStatus.read": false
+                    "readStatus.read": false,
+                    senderId: { $nin: allExclusions.map(id => new mongoose.Types.ObjectId(String(id))) }
                 }
             },
             {
@@ -194,6 +206,39 @@ router.post("/block/:matchId", auth, async (req, res) => {
             { upsert: true }
         );
 
+        // 3. Update User model's blockedUsers array for the list view
+        await User.findByIdAndUpdate(userId, {
+            $addToSet: { blockedUsers: targetId }
+        });
+
+        // 4. Mark all unread messages/notifications as read between them
+        await Promise.all([
+            Message.updateMany(
+                { matchId: match._id, receiverId: targetId, "readStatus.read": false },
+                { "readStatus.read": true, "readStatus.readAt": new Date() }
+            ),
+            Message.updateMany(
+                { matchId: match._id, receiverId: userId, "readStatus.read": false },
+                { "readStatus.read": true, "readStatus.readAt": new Date() }
+            ),
+            Notification.updateMany(
+                { userId: targetId, read: false, "data.senderId": String(userId) },
+                { read: true }
+            ),
+            Notification.updateMany(
+                { userId: userId, read: false, "data.senderId": String(targetId) },
+                { read: true }
+            )
+        ]);
+
+        // 5. Emit countsUpdate to both parties so badge refreshes
+        const io = req.app.get("io");
+        const redisClient = req.app.get("redisClient");
+        await Promise.all([
+            emitToUserSockets(io, redisClient, userId, "countsUpdate", { source: "block" }),
+            emitToUserSockets(io, redisClient, targetId, "countsUpdate", { source: "blocked" })
+        ]);
+
         res.json({ success: true, message: "User blocked" });
     } catch (err) {
         console.error("Block error:", err);
@@ -230,6 +275,11 @@ router.post("/report/:matchId", auth, async (req, res) => {
             { userId, targetUserId: targetId, actionType: "block", timestamp: new Date() },
             { upsert: true }
         );
+
+        // 3. Update User model's blockedUsers array for the list view
+        await User.findByIdAndUpdate(userId, {
+            $addToSet: { blockedUsers: targetId }
+        });
 
         res.json({ success: true, message: "User reported and blocked" });
     } catch (err) {

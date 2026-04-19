@@ -19,6 +19,8 @@ const imagekitRoutes = require("./routes/imagekit");
 const fcmRoutes = require("./routes/fcm");
 const notificationRoutes = require("./routes/notifications");
 const adminRoutes = require("./routes/admin");
+const successStoryRoutes = require("./routes/successStory");
+const supportRoutes = require("./routes/support");
 const { sendChatMessagePush } = require("./services/fcmPush");
 const { createStoredNotification } = require("./services/storedNotification");
 require("./workers/botWorker");
@@ -72,12 +74,15 @@ app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/dating", datingRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/support", supportRoutes);
 app.use("/api/imagekit", imagekitRoutes);
 app.use("/api", fcmRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/payment", require("./routes/payment"));
+app.use("/api/admin/auth", require("./routes/adminAuth"));
 app.use("/api/admin", adminRoutes);
 app.use("/api/pricing", require("./routes/pricing"));
+app.use("/api/stories", successStoryRoutes);
 
 app.get("/health", (req, res) => res.json({ status: "OK" }));
 
@@ -250,6 +255,7 @@ io.on("connection", (socket) => {
                         senderName: finalSenderName,
                         senderPhoto: finalSenderPhoto,
                         content: finalBody,
+                        isLocked: !isPremiumReceiver,
                     },
                 });
 

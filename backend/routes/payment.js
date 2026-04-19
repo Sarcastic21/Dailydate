@@ -2,7 +2,7 @@ const express = require("express");
 const crypto = require("crypto");
 const auth = require("../middleware/auth");
 const User = require("../models/User");
-const { getPlan, listPlansForClient } = require("../config/subscriptionPlans");
+const Pricing = require("../models/Pricing");
 const { buildSubscriptionPayload, hasPremiumAccess } = require("../services/subscription");
 const { cancelAllPending } = require("../services/botInteractionService");
 
@@ -18,10 +18,25 @@ function getRazorpay() {
 
 router.get("/plans", auth, async (req, res) => {
     try {
-        const plans = await listPlansForClient();
+        const plans = await Pricing.find({ isActive: true }).sort({ durationMonths: 1 });
+        const formattedPlans = plans.map(plan => ({
+            id: plan._id,
+            tier: plan.tier,
+            durationMonths: plan.durationMonths,
+            originalPrice: plan.originalPrice,
+            discountedPrice: plan.discountedPrice,
+            discountPercentage: plan.discountPercentage,
+            monthlyPrice: plan.monthlyPrice,
+            amountPaise: plan.amountPaise,
+            label: plan.label,
+            badge: plan.badge,
+            badgeEmoji: plan.badgeEmoji,
+            banner: plan.banner?.isActive ? plan.banner : null
+        }));
+
         res.json({
             success: true,
-            plans,
+            plans: formattedPlans,
             keyId: process.env.RAZORPAY_KEY_ID || "",
         });
     } catch (err) {
@@ -32,7 +47,7 @@ router.get("/plans", auth, async (req, res) => {
 router.post("/create-order", auth, async (req, res) => {
     try {
         const { planId } = req.body;
-        const plan = await getPlan(planId);
+        const plan = await Pricing.findById(planId);
         if (!plan) {
             return res.status(400).json({ success: false, message: "Invalid plan" });
         }
@@ -90,7 +105,7 @@ router.post("/verify", auth, async (req, res) => {
             return res.status(400).json({ success: false, message: "Missing payment fields" });
         }
 
-        const plan = await getPlan(planId);
+        const plan = await Pricing.findById(planId);
         if (!plan) {
             return res.status(400).json({ success: false, message: "Invalid plan" });
         }

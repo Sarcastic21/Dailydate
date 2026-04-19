@@ -10,12 +10,14 @@ const profilePhotoSchema = new mongoose.Schema({
 const userSchema = new mongoose.Schema({
     // ── Basic Auth ──────────────────────────────────────
     name: { type: String, default: "" },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    email: { type: String, unique: true, lowercase: true, trim: true, sparse: true },
+    phone: { type: String, unique: true, trim: true, sparse: true },
     password: { type: String, default: "" },
     otp: { type: String, default: "" },
     otpExpiry: { type: Date, default: null },
     isVerified: { type: Boolean, default: false },
     googleUser: { type: Boolean, default: false },
+    themePreference: { type: String, enum: ["light", "dark"], default: "light" },
 
     // ── Profile ─────────────────────────────────────────
     profilePhotos: { type: [profilePhotoSchema], default: [] },

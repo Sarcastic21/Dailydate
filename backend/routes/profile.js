@@ -17,7 +17,7 @@ const imagekit = new ImageKit({
 router.get("/me", auth, async (req, res) => {
     try {
         const user = await User.findById(req.userId)
-            .select("-password -otp -otpExpiry")
+            .select("-password -otp -otpExpiry -fcmToken -usageDaily -blockedUsers -registrationStep -__v -phone -notificationPreferences -personality -lifestyle -physical -beliefs")
             .lean();
         if (!user) return res.status(404).json({ message: "Not found", success: false });
         const full = await User.findById(req.userId);
@@ -339,9 +339,10 @@ router.post("/complete", auth, async (req, res) => {
 // Update profile
 router.put("/update", auth, async (req, res) => {
     try {
-        const { name, bio, ageRange, maxDistance, intention, lookingFor, personality, lifestyle, physical, beliefs } = req.body;
+        const { name, bio, ageRange, maxDistance, intention, lookingFor, personality, lifestyle, physical, beliefs, themePreference } = req.body;
         const updates = {};
         if (name) updates.name = name;
+        if (themePreference) updates.themePreference = themePreference;
         if (bio !== undefined) updates.bio = bio;
         if (ageRange) updates.ageRange = ageRange;
         if (maxDistance) updates.maxDistance = maxDistance;
@@ -361,6 +362,20 @@ router.put("/update", auth, async (req, res) => {
         res.json({ success: true, user });
     } catch (err) {
         console.error("Profile update error:", err);
+        res.status(500).json({ message: "Server error", success: false });
+    }
+});
+
+// Update theme preference specifically (for faster sync)
+router.post("/theme", auth, async (req, res) => {
+    try {
+        const { theme } = req.body;
+        if (!["light", "dark"].includes(theme)) {
+            return res.status(400).json({ message: "Invalid theme", success: false });
+        }
+        await User.findByIdAndUpdate(req.userId, { themePreference: theme });
+        res.json({ success: true, theme });
+    } catch (err) {
         res.status(500).json({ message: "Server error", success: false });
     }
 });

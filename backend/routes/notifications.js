@@ -4,6 +4,7 @@ const auth = require("../middleware/auth");
 const Notification = require("../models/Notification");
 const User = require("../models/User");
 const { updateNotificationPreferences } = require("../services/notificationService");
+const { hasPremiumAccess } = require("../services/subscription");
 
 const router = express.Router();
 
@@ -13,7 +14,91 @@ router.get("/", auth, async (req, res) => {
             .sort({ createdAt: -1 })
             .limit(100)
             .lean();
-        res.json({ success: true, notifications });
+
+        const currentUser = await User.findById(req.userId).select("accountType subscriptionExpiresAt blockedUsers");
+        const isPremium = hasPremiumAccess(currentUser);
+        const blockedUsers = currentUser.blockedUsers || [];
+        const blockedUserIds = new Set(blockedUsers.map(id => String(id)));
+
+        // Filter out notifications from blocked users
+        const filteredNotifications = notifications.filter(n => {
+            const senderId = n.data?.senderId || n.data?.viewerId;
+            return !blockedUserIds.has(String(senderId));
+        });
+
+        if (!isPremium) {
+            return res.json({ success: true, notifications: filteredNotifications });
+        }
+
+        // Identify unique IDs of users involved in locked notifications
+        const uniqueUserIds = new Set();
+        filteredNotifications.forEach(n => {
+            if (n.data && (n.data.isLocked === 'true' || n.data.isLocked === true)) {
+                const uid = n.data.senderId || n.data.viewerId;
+                if (uid && mongoose.Types.ObjectId.isValid(uid)) {
+                    uniqueUserIds.add(String(uid));
+                }
+            }
+        });
+
+        // Fetch user data in bulk
+        const usersList = await User.find({
+            _id: { $in: Array.from(uniqueUserIds) }
+        }).select("name profilePhotos city state").lean();
+
+        const userMap = {};
+        usersList.forEach(u => {
+            userMap[String(u._id)] = u;
+        });
+
+        // Process and un-redact notifications
+        const processedNotifications = filteredNotifications.map(n => {
+            if (!n.data || (!n.data.isLocked || n.data.isLocked === 'false')) return n;
+
+            const d = n.data;
+            const uid = d.senderId || d.viewerId;
+            const realUser = userMap[String(uid)];
+
+            if (!realUser) return n;
+
+            // Use real data to rebuild
+            const senderName = realUser.name;
+            const senderPhoto = realUser.profilePhotos?.[0]?.url || d.senderPhoto || d.viewerPhoto;
+            const city = realUser.city || d.senderCity || d.viewerCity;
+            const state = realUser.state || d.senderState || d.viewerState;
+            const locationStr = city ? `${city}, ${state || ''}` : (state || "");
+
+            let title = n.title;
+            let body = n.body;
+
+            if (n.type === 'like') {
+                title = `${senderName} liked you! ❤️`;
+                body = `Check out their profile and start a conversation!`;
+            } else if (n.type === 'view') {
+                title = `${senderName} viewed your profile 👀`;
+                body = locationStr ? `They are from ${locationStr}. Check them out!` : "Check out who's interested in you!";
+            } else if (n.type === 'match') {
+                title = "It's a Match! 💕";
+                body = `${senderName} liked you back — start chatting!`;
+            } else if (n.type === 'message') {
+                title = `${senderName} messaged you 💬`;
+                body = d.content || "You have a new message from them.";
+            }
+
+            return {
+                ...n,
+                title,
+                body,
+                data: {
+                    ...d,
+                    senderName, // Update metadata just in case
+                    senderPhoto,
+                    isLocked: 'false'
+                }
+            };
+        });
+
+        res.json({ success: true, notifications: processedNotifications });
     } catch (err) {
         console.error("notifications list:", err);
         res.status(500).json({ success: false, message: "Server error" });
@@ -22,7 +107,17 @@ router.get("/", auth, async (req, res) => {
 
 router.get("/unread-count", auth, async (req, res) => {
     try {
-        const count = await Notification.countDocuments({ userId: req.userId, read: false });
+        const me = await User.findById(req.userId).select("blockedUsers");
+        const blockedByMe = me?.blockedUsers || [];
+        const blockedByThem = await User.find({ blockedUsers: req.userId }).select("_id").lean();
+        const theyBlockedMe = blockedByThem.map(u => String(u._id));
+        const allExclusions = [...blockedByMe.map(id => String(id)), ...theyBlockedMe];
+
+        const count = await Notification.countDocuments({ 
+            userId: req.userId, 
+            read: false,
+            "data.senderId": { $nin: allExclusions }
+        });
         res.json({ success: true, count });
     } catch (err) {
         res.status(500).json({ success: false, message: "Server error" });
@@ -31,8 +126,20 @@ router.get("/unread-count", auth, async (req, res) => {
 
 router.get("/unread-breakdown", auth, async (req, res) => {
     try {
+        const me = await User.findById(req.userId).select("blockedUsers");
+        const blockedByMe = me?.blockedUsers || [];
+        const blockedByThem = await User.find({ blockedUsers: req.userId }).select("_id").lean();
+        const theyBlockedMe = blockedByThem.map(u => String(u._id));
+        const allExclusions = [...blockedByMe.map(id => String(id)), ...theyBlockedMe];
+
         const counts = await Notification.aggregate([
-            { $match: { userId: new mongoose.Types.ObjectId(req.userId), read: false } },
+            { 
+                $match: { 
+                    userId: new mongoose.Types.ObjectId(req.userId), 
+                    read: false,
+                    "data.senderId": { $nin: allExclusions }
+                } 
+            },
             { $group: { _id: "$type", count: { $sum: 1 } } }
         ]);
 

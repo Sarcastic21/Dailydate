@@ -3,6 +3,8 @@ const User = require("../models/User");
 const Match = require("../models/Match");
 const UserAction = require("../models/UserAction");
 const ProfileView = require("../models/ProfileView");
+const Message = require("../models/Message");
+const Notification = require("../models/Notification");
 const auth = require("../middleware/auth");
 const { emitToUserSockets } = require("../utils/socketEmit");
 const { hasActiveSocket } = require("../utils/socketPresence");
@@ -12,6 +14,7 @@ const {
     ensureUsageDay,
     canLike,
     hasPremiumAccess,
+    buildSubscriptionPayload,
 } = require("../services/subscription");
 const botInteractionService = require("../services/botInteractionService");
 
@@ -46,6 +49,9 @@ router.get("/discover", auth, async (req, res) => {
     try {
         const userId = req.userId;
         const requestedState = req.query.state;
+        const limit = parseInt(req.query.limit) || 20;
+        const page = parseInt(req.query.page) || 1;
+        const skip = (page - 1) * limit;
 
         // Parallel queries for better performance
         const [user, interacted, blockedBy] = await Promise.all([
@@ -100,40 +106,41 @@ router.get("/discover", auth, async (req, res) => {
 
         let users;
         if (!isExplicitState) {
-            // "Anywhere" mode: Fetch a larger sample and shuffle in memory
-            // This ensures a fresh batch every time the app opens/refreshes
+            /** 
+             * "Anywhere" mode: 
+             * In paginated mode, we still want variety. 
+             * Simple skip/limit might show the same people in different orders if not sorted.
+             * For now, we sort by lastActive to keep it relatively stable across pages.
+             */
             users = await User.find(query)
                 .select("name profilePhotos dateOfBirth gender bio lastActive state city isOnline intention lookingFor")
-                .limit(200);
-
-            // Random Shuffle
-            users.sort(() => Math.random() - 0.5);
+                .sort({ lastActive: -1 })
+                .skip(skip)
+                .limit(limit);
         } else {
             // Explicit state mode: Filter strictly by requested state
             query.state = { $regex: new RegExp("^" + requestedState + "$", "i") };
 
             users = await User.find(query)
                 .select("name profilePhotos dateOfBirth gender bio lastActive state city isOnline intention lookingFor")
-                .limit(1000)
-                .sort({ isOnline: -1, lastActive: -1 });
+                .sort({ isOnline: -1, lastActive: -1 })
+                .skip(skip)
+                .limit(limit);
         }
 
         let noResultsInState = false;
 
         // Fallback logic: Only fallback if results are low AND no specific state was requested.
         // If a user explicitly selects a state in the picker, we should show only that state.
-        if (users.length < 10 && !isExplicitState && requestedState) {
+        if (users.length === 0 && !isExplicitState && requestedState && page === 1) {
             noResultsInState = true;
             delete query.state;
-            const extraUsers = await User.find(query)
+            users = await User.find(query)
                 .select("name profilePhotos dateOfBirth gender bio lastActive state city isOnline intention lookingFor")
-                .limit(1000 - users.length)
-                .sort({ isOnline: -1, lastActive: -1 });
-
-            // Deduplicate
-            const existingIds = new Set(users.map(u => String(u._id)));
-            users = [...users, ...extraUsers.filter(u => !existingIds.has(String(u._id)))];
-        } else if (users.length === 0 && isExplicitState) {
+                .sort({ isOnline: -1, lastActive: -1 })
+                .skip(skip)
+                .limit(limit);
+        } else if (users.length === 0 && isExplicitState && page === 1) {
             noResultsInState = true;
         }
 
@@ -151,7 +158,13 @@ router.get("/discover", auth, async (req, res) => {
             lookingFor: u.lookingFor,
         }));
 
-        res.json({ success: true, users: formatted, noResultsInState });
+        res.json({ 
+            success: true, 
+            users: formatted, 
+            noResultsInState,
+            hasMore: formatted.length === limit,
+            page: page
+        });
     } catch (err) {
         console.error("Discover error:", err);
         res.status(500).json({ message: "Server error", success: false });
@@ -289,8 +302,10 @@ router.post("/like/:targetId", auth, async (req, res) => {
                 senderId: String(userId),
                 senderName,
                 senderPhoto,
+                senderCity: me ? me.city : "",
+                senderState: me ? me.state : "",
                 matchId: matchId ? String(matchId) : "",
-                isLocked: String(!isTargetPremium),
+                isLocked: !isTargetPremium,
             });
 
             if (targetOnline) {
@@ -400,24 +415,35 @@ router.get("/interactions", auth, async (req, res) => {
     try {
         const userId = req.userId;
 
+        const me = await User.findById(userId);
+        const blockedUsers = me?.blockedUsers || [];
+
         // Parallel queries for better performance
-        const [me, likesReceived, profileViews, matches] = await Promise.all([
-            User.findById(userId),
-            UserAction.find({ targetUserId: userId, actionType: "like" })
-                .populate("userId", "name profilePhotos lastActive state gender bio dateOfBirth isOnline")
+        const [likesReceived, profileViews, matches] = await Promise.all([
+            UserAction.find({ 
+                targetUserId: userId, 
+                actionType: "like",
+                userId: { $nin: blockedUsers } 
+            })
+                .populate("userId", "name profilePhotos lastActive state city gender bio dateOfBirth isOnline")
                 .sort({ timestamp: -1 })
                 .limit(50),
-            ProfileView.find({ targetUserId: userId })
-                .populate("viewerId", "name profilePhotos lastActive state gender bio dateOfBirth isOnline")
+            ProfileView.find({ 
+                targetUserId: userId,
+                viewerId: { $nin: blockedUsers } 
+            })
+                .populate("viewerId", "name profilePhotos lastActive state city gender bio dateOfBirth isOnline")
                 .sort({ viewedAt: -1 })
                 .limit(50),
             Match.find({
                 $or: [{ user1Id: userId }, { user2Id: userId }],
                 status: "matched",
                 mutualMatch: { $ne: false },
+                user1Id: { $nin: blockedUsers },
+                user2Id: { $nin: blockedUsers }
             })
-                .populate("user1Id", "name profilePhotos lastActive state gender bio dateOfBirth isOnline")
-                .populate("user2Id", "name profilePhotos lastActive state gender bio dateOfBirth isOnline")
+                .populate("user1Id", "name profilePhotos lastActive state city gender bio dateOfBirth isOnline")
+                .populate("user2Id", "name profilePhotos lastActive state city gender bio dateOfBirth isOnline")
                 .sort({ matchedAt: -1 })
                 .limit(50)
         ]);
@@ -429,6 +455,7 @@ router.get("/interactions", auth, async (req, res) => {
             age: calculateAge(l.userId.dateOfBirth?.fullDate),
             isOnline: l.userId.isOnline,
             state: l.userId.state,
+            city: l.userId.city,
             gender: l.userId.gender,
             timestamp: l.timestamp
         }));
@@ -440,6 +467,7 @@ router.get("/interactions", auth, async (req, res) => {
             age: calculateAge(v.viewerId.dateOfBirth?.fullDate),
             isOnline: v.viewerId.isOnline,
             state: v.viewerId.state,
+            city: v.viewerId.city,
             gender: v.viewerId.gender,
             timestamp: v.viewedAt
         }));
@@ -499,9 +527,21 @@ router.get("/user/:userId", auth, async (req, res) => {
         const targetUserId = req.params.userId;
         const userId = req.userId;
 
-        const user = await User.findById(targetUserId)
-            .select("name profilePhotos dateOfBirth gender bio stats lastActive state city isOnline intention lookingFor personality lifestyle physical beliefs accountType subscriptionExpiresAt isVerified");
-        if (!user) return res.status(404).json({ message: "Not found", success: false });
+        const [targetUser, currentUser] = await Promise.all([
+            User.findById(targetUserId).select("name profilePhotos dateOfBirth gender bio stats lastActive state city isOnline intention lookingFor personality lifestyle physical beliefs accountType subscriptionExpiresAt isVerified blockedUsers"),
+            User.findById(userId).select("blockedUsers")
+        ]);
+
+        if (!targetUser) return res.status(404).json({ message: "Not found", success: false });
+
+        // Security Guard: Check if blocked (either way)
+        const myBlocked = currentUser?.blockedUsers || [];
+        const theirBlocked = targetUser?.blockedUsers || [];
+        if (myBlocked.includes(targetUserId) || theirBlocked.includes(userId)) {
+            return res.status(403).json({ message: "Access restricted", success: false, code: "BLOCKED" });
+        }
+
+        const user = targetUser;
 
         let recordedNewProfileView = false;
         // Record a view if not viewing self
@@ -532,13 +572,17 @@ router.get("/user/:userId", auth, async (req, res) => {
             ]
         });
 
+        const age = calculateAge(user.dateOfBirth?.fullDate);
+        const tier = user.subscription?.effectiveTier || user.accountType || 'normal';
+        const isPremium = tier === 'gold';
+
         res.json({
             success: true,
             user: {
                 id: user._id,
                 name: user.name,
                 photos: user.profilePhotos,
-                age: user.age || calculateAge(user.dateOfBirth?.fullDate),
+                age: age,
                 gender: user.gender,
                 bio: user.bio,
                 stats: user.stats,
@@ -554,6 +598,8 @@ router.get("/user/:userId", auth, async (req, res) => {
                 beliefs: user.beliefs,
                 hasLiked: Boolean(hasLiked),
                 isMatch: Boolean(isMatch),
+                subscription: buildSubscriptionPayload(user),
+                accountType: user.accountType,
                 isPremium: hasPremiumAccess(user),
                 isVerified: user.isVerified || false
             },
@@ -603,21 +649,29 @@ router.get("/user/:userId", auth, async (req, res) => {
 // ─── GET ONLINE USERS DIRECTORY ─────────────────────────────
 router.get("/online-users", auth, async (req, res) => {
     try {
-        const currentUser = await User.findById(req.userId);
-        // Exclude deactivated users and users pending deletion
+        const [me, blockedByThem] = await Promise.all([
+            User.findById(req.userId).select("gender lookingFor blockedUsers"),
+            UserAction.find({ targetUserId: req.userId, actionType: "block" }).distinct("userId")
+        ]);
+
+        if (!me) return res.status(404).json({ success: false, message: "User not found" });
+
+        const myBlocked = me.blockedUsers || [];
+        const ignored = [...myBlocked.map(id => String(id)), ...blockedByThem.map(id => String(id)), String(req.userId)];
+        
+        // Exclude blocked users, deactivated users, and users pending deletion
         const query = {
-            _id: { $ne: req.userId },
-            isVerified: true,
+            _id: { $nin: ignored },
             isDeactivated: { $ne: true },
             deletionRequestedAt: null
         };
 
-        if (currentUser.gender === "male") query.gender = "female";
-        else if (currentUser.gender === "female") query.gender = "male";
-        else if (currentUser.lookingFor && currentUser.lookingFor !== "everyone") query.gender = currentUser.lookingFor;
+        if (me.gender === "male") query.gender = "female";
+        else if (me.gender === "female") query.gender = "male";
+        else if (me.lookingFor && me.lookingFor !== "everyone") query.gender = me.lookingFor;
 
         const users = await User.find(query)
-            .select("name profilePhotos lastActive bio gender state city isOnline createdAt intention lookingFor")
+            .select("name profilePhotos lastActive bio gender state city isOnline createdAt intention lookingFor isVerified accountType subscriptionExpiresAt")
             .sort({ lastActive: -1 })
             .limit(1000);
 
@@ -634,7 +688,11 @@ router.get("/online-users", auth, async (req, res) => {
             createdAt: u.createdAt,
             intention: u.intention,
             lookingFor: u.lookingFor,
-            gender: u.gender
+            gender: u.gender,
+            isVerified: u.isVerified || false,
+            accountType: u.accountType,
+            subscription: buildSubscriptionPayload(u),
+            isPremium: hasPremiumAccess(u)
         }));
 
         // Sort: Online first, then by last active
@@ -701,13 +759,41 @@ router.post("/block/:userId", auth, async (req, res) => {
         user.blockedUsers.push(blockedId);
         await user.save();
 
-        // Remove any existing match between them
-        await Match.deleteMany({
+        // 2. Mark any existing match as blocked instead of deleting it
+        await Match.updateMany({
             $or: [
                 { user1Id: blockerId, user2Id: blockedId },
                 { user1Id: blockedId, user2Id: blockerId }
             ]
-        });
+        }, { status: "blocked" });
+
+        // 2. Mark all unread messages/notifications as read between them
+        await Promise.all([
+            Message.updateMany(
+                { receiverId: blockedId, senderId: blockerId, "readStatus.read": false },
+                { "readStatus.read": true, "readStatus.readAt": new Date() }
+            ),
+            Message.updateMany(
+                { receiverId: blockerId, senderId: blockedId, "readStatus.read": false },
+                { "readStatus.read": true, "readStatus.readAt": new Date() }
+            ),
+            Notification.updateMany(
+                { userId: blockedId, read: false, "data.senderId": String(blockerId) },
+                { read: true }
+            ),
+            Notification.updateMany(
+                { userId: blockerId, read: false, "data.senderId": String(blockedId) },
+                { read: true }
+            )
+        ]);
+
+        // 3. Emit countsUpdate to both parties so badge refreshes
+        const io = req.app.get("io");
+        const redisClient = req.app.get("redisClient");
+        await Promise.all([
+            emitToUserSockets(io, redisClient, blockerId, "countsUpdate", { source: "block" }),
+            emitToUserSockets(io, redisClient, blockedId, "countsUpdate", { source: "blocked" })
+        ]);
 
         res.json({ success: true, message: "User blocked successfully" });
     } catch (err) {
@@ -730,6 +816,25 @@ router.post("/unblock/:userId", auth, async (req, res) => {
         user.blockedUsers = user.blockedUsers.filter(id => id.toString() !== blockedId);
         await user.save();
 
+        // Restore any blocked match status
+        await Match.updateOne(
+            {
+                $or: [
+                    { user1Id: blockerId, user2Id: blockedId },
+                    { user1Id: blockedId, user2Id: blockerId }
+                ],
+                status: "blocked"
+            },
+            { status: "active" }
+        );
+
+        // Delete the block user action to restore discovery
+        await UserAction.deleteOne({
+            userId: blockerId,
+            targetUserId: blockedId,
+            actionType: "block"
+        });
+
         res.json({ success: true, message: "User unblocked successfully" });
     } catch (err) {
         console.error("Unblock user error:", err);
@@ -741,8 +846,11 @@ router.post("/unblock/:userId", auth, async (req, res) => {
 router.get("/blocked", auth, async (req, res) => {
     try {
         const user = await User.findById(req.userId).populate("blockedUsers", "name profilePhotos");
+        const locked = !hasPremiumAccess(user);
+
         res.json({
             success: true,
+            locked: locked,
             blockedUsers: (user.blockedUsers || []).map(u => ({
                 id: u._id,
                 name: u.name,
@@ -796,14 +904,19 @@ router.post("/report/:userId", auth, async (req, res) => {
 router.get("/my-likes", auth, async (req, res) => {
     try {
         const userId = req.userId;
+        const me = await User.findById(userId);
+        const blockedUsers = me?.blockedUsers || [];
 
-        const likesGiven = await UserAction.find({
-            userId: userId,
-            actionType: "like"
+        const likesGiven = await UserAction.find({ 
+            userId, 
+            actionType: "like",
+            targetUserId: { $nin: blockedUsers } 
         })
             .populate("targetUserId", "name profilePhotos lastActive state city gender bio dateOfBirth isOnline")
             .sort({ timestamp: -1 })
             .limit(100);
+
+        const locked = !hasPremiumAccess(me);
 
         const formattedLikes = likesGiven.map(l => ({
             actionId: l._id,
@@ -818,7 +931,7 @@ router.get("/my-likes", auth, async (req, res) => {
             timestamp: l.timestamp
         }));
 
-        res.json({ success: true, likes: formattedLikes });
+        res.json({ success: true, likes: formattedLikes, locked: locked });
     } catch (err) {
         console.error("Get my likes error:", err);
         res.status(500).json({ message: "Server error", success: false });

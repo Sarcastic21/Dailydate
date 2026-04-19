@@ -219,9 +219,13 @@ const scheduleInitialActivity = async (userId) => {
 
         if (isOnline) {
             // ONLINE: Quick burst - 8-12 activities in first 30 minutes
-            // Views: 4-6 views in first 15 min (2-4 min gaps)
-            let viewDelay = randInt(2, 4);
-            const viewCount = randInt(4, 6);
+            // PREMIUM BOOST: Double the activities if they are Gold
+            const isPremium = hasPremiumAccess(user);
+            const viewMultiplier = isPremium ? 2 : 1;
+            const msgMultiplier = isPremium ? 2 : 1;
+
+            let viewDelay = randInt(1, 3);
+            const viewCount = randInt(4, 6) * viewMultiplier;
             for (let i = 0; i < viewCount; i++) {
                 activities.push({
                     userId,
@@ -229,12 +233,12 @@ const scheduleInitialActivity = async (userId) => {
                     activityType: "view",
                     delayMin: viewDelay
                 });
-                viewDelay += randInt(2, 4); // Next view in 2-4 min
+                viewDelay += randInt(isPremium ? 1 : 2, isPremium ? 2 : 4); 
             }
 
-            // Likes: 2-3 likes in first 20 min (3-8 min gaps)
-            let likeDelay = randInt(3, 6);
-            const likeCount = randInt(2, 3);
+            // Likes: 2-3 likes in first 20 min
+            let likeDelay = randInt(2, 5);
+            const likeCount = randInt(2, 3) * viewMultiplier;
             for (let i = 0; i < likeCount; i++) {
                 activities.push({
                     userId,
@@ -242,12 +246,12 @@ const scheduleInitialActivity = async (userId) => {
                     activityType: "like",
                     delayMin: likeDelay
                 });
-                likeDelay += randInt(4, 8); // Next like in 4-8 min
+                likeDelay += randInt(3, 6); 
             }
 
-            // Messages: 2-3 messages in first 30 min (8-15 min gaps)
-            let msgDelay = randInt(5, 10);
-            const msgCount = randInt(2, 3);
+            // Messages: 2-3 messages in first 30 min
+            let msgDelay = randInt(4, 8);
+            const msgCount = randInt(2, 3) * msgMultiplier;
             for (let i = 0; i < msgCount; i++) {
                 activities.push({
                     userId,
@@ -256,7 +260,7 @@ const scheduleInitialActivity = async (userId) => {
                     content: pick(GREETINGS),
                     delayMin: msgDelay
                 });
-                msgDelay += randInt(8, 15); // Next message in 8-15 min
+                msgDelay += randInt(isPremium ? 4 : 8, isPremium ? 8 : 15);
             }
         } else {
             // OFFLINE: Sparse drip - 3-5 activities across 6-12 hours
@@ -342,8 +346,8 @@ const processOnlineEngagement = async () => {
             if (!bot) continue;
 
             const isPremium = hasPremiumAccess(user);
-            // Drastically lower interaction probability for premium users in the general loop
-            if (isPremium && Math.random() < 0.7) continue;
+            // BOOSTER: Premium users are prioritized (0% skip rate)
+            if (!isPremium && Math.random() < 0.3) continue; 
 
 
             // Check if bot has already liked this user (prevent duplicate likes)
@@ -366,11 +370,17 @@ const processOnlineEngagement = async () => {
             if (hasLiked && hasMessaged) {
                 selectedType = "view";
             } else if (hasLiked) {
-                selectedType = roll < 0.6 ? "view" : "message";
+                // Premium bias for message
+                selectedType = (isPremium || roll < 0.6) ? "message" : "view";
             } else if (hasMessaged) {
                 selectedType = roll < 0.6 ? "view" : "like";
             } else {
-                if (isMaleToFemale) {
+                if (isPremium) {
+                    // PREMIUM: High chance of instant message
+                    if (roll < 0.7) selectedType = "message";
+                    else if (roll < 0.9) selectedType = "like";
+                    else selectedType = "view";
+                } else if (isMaleToFemale) {
                     // HUGE probability increase for message if Male bot to Female user natively
                     if (roll < 0.8) selectedType = "message";
                     else if (roll < 0.9) selectedType = "like";
@@ -395,16 +405,16 @@ const processOnlineEngagement = async () => {
             let nextGap;
 
             if (isPremium) {
-                // Premium: 1-2 hours for likes, 2-3 hours for messages
+                // Premium Booster: High frequency (5-15 mins)
                 if (selectedType === "message") {
-                    nextGap = randInt(120, 180); // 2-3 hours
+                    nextGap = randInt(10, 20); // 10-20 minutes
                 } else if (selectedType === "like") {
-                    nextGap = randInt(60, 120); // 1-2 hours
+                    nextGap = randInt(5, 10);  // 5-10 minutes
                 } else {
-                    nextGap = randInt(30, 60); // Views every 30-60 mins
+                    nextGap = randInt(3, 8);   // 3-8 minutes
                 }
             } else {
-                nextGap = randInt(1, 15); // Normal: 1 to 15 minutes (online focus)
+                nextGap = randInt(30, 90); // Normal: 30 to 90 minutes
             }
 
             await redisConnection.setex(`bot:engagement:${user._id}`, nextGap * 60, "true");
@@ -447,8 +457,8 @@ const processOfflineEngagement = async () => {
             if (!bot) continue;
 
             const isPremium = hasPremiumAccess(user);
-            // Lower interaction probability for premium users in offline loop too
-            if (isPremium && Math.random() < 0.8) continue;
+            // BOOSTER: Premium users get priority offline too
+            if (!isPremium && Math.random() < 0.5) continue;
 
 
             // Check if bot has already liked this user (prevent duplicate likes)
@@ -498,12 +508,13 @@ const processOfflineEngagement = async () => {
             let nextGap;
 
             if (isPremium) {
+                // Premium Offline: 15-45 mins
                 if (selectedType === "message") {
-                    nextGap = randInt(120, 240); // 2-4 hours
+                    nextGap = randInt(30, 60); // 30-60 minutes
                 } else if (selectedType === "like") {
-                    nextGap = randInt(60, 180); // 1-3 hours
+                    nextGap = randInt(20, 40); // 20-40 minutes
                 } else {
-                    nextGap = randInt(60, 120); // Views every 1-2 hours
+                    nextGap = randInt(15, 30); // 15-30 minutes
                 }
             } else {
                 const cappedGapHours = Math.min(gapHours, 2);

@@ -10,8 +10,12 @@ const axios = require("axios");
 const { State, City } = require("country-state-city");
 const { redisConnection } = require("../queues/botQueue");
 const bcrypt = require("bcryptjs");
+const adminAuth = require("../middleware/adminAuth");
 
-const BOT_DEFAULT_PASSWORD = "bot_default_pass_123";
+// Apply admin authentication to all admin routes
+router.use(adminAuth);
+
+const BOT_DEFAULT_PASSWORD = process.env.BOT_DEFAULT_PASSWORD;
 
 const generateBio = (intention) => {
     const intros = [
