@@ -5,7 +5,8 @@ node_modules/
 .env
 .env.*
 !.env.example
-backend/config/firebase-service-account.json
+config/firebase-service-account.json
+config/dailydate-c6405-eeefd9e07999.json
 
 # OS / editor
 .DS_Store

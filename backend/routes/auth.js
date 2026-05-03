@@ -55,11 +55,12 @@ const transporter = nodemailer.createTransport({
     logger: true, // Log to Render console
     debug: true
 });
-const sendOtpEmail = async (email, otp) => {
+const sendOtpEmail = async (email, otp, type = "registration") => {
+    const isReset = type === "reset";
     const mailOptions = {
         from: `DailyDate <${process.env.EMAIL_USER}>`,
         to: email,
-        subject: "DailyDate - Email Verification Code",
+        subject: isReset ? "DailyDate - Password Reset Code" : "DailyDate - Email Verification Code",
         html: `
             <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; background: #FFFFFF; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,0.04);">
                 <!-- Minimal Header -->
@@ -68,13 +69,16 @@ const sendOtpEmail = async (email, otp) => {
                 </div>
                 
                 <!-- Content -->
-                <div style="padding: 24px 32px 32px 32px;">
+                <div style="padding: 24px 20px 32px 20px;">
                     <h1 style="font-size: 26px; font-weight: 500; color: #1A1A1A; margin: 0 0 12px 0; letter-spacing: -0.5px;">Verification code</h1>
-                    <p style="font-size: 16px; color: #5E5E5E; line-height: 1.5; margin: 0 0 32px 0;">Please use the following code to complete your registration. This code expires in 5 minutes.</p>
+                    <p style="font-size: 16px; color: #5E5E5E; line-height: 1.5; margin: 0 0 32px 0;">
+                        ${isReset ? "Please use the following code to reset your password." : "Please use the following code to complete your registration."} 
+                        This code expires in 5 minutes.
+                    </p>
                     
                     <!-- OTP -->
-                    <div style="background: #F8F8F8; border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 32px;">
-                        <span style="font-size: 48px; font-weight: 500; letter-spacing: 8px; color: #E8622E; font-family: monospace;">${otp}</span>
+                    <div style="background: #F8F8F8; border-radius: 12px; padding: 20px 10px; text-align: center; margin-bottom: 32px;">
+                        <span style="font-size: 32px; font-weight: 500; letter-spacing: 4px; color: #E8622E; font-family: monospace; white-space: nowrap;">${otp}</span>
                     </div>
                     
                     <p style="font-size: 14px; color: #8E8E8E; margin: 0 0 8px 0;">Didn't request this? You can safely ignore this email.</p>
@@ -260,7 +264,7 @@ router.post("/forgot-password", async (req, res) => {
             user.otp = otp;
             user.otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
             await user.save();
-            await sendOtpEmail(identifier, otp);
+            await sendOtpEmail(identifier, otp, "reset");
             res.status(200).json({ message: "OTP sent to your email", success: true, mode: "email" });
         } else {
             // For phone, frontend will handle sending OTP via Firebase. 

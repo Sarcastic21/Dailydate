@@ -59,6 +59,10 @@ router.get("/discover", auth, async (req, res) => {
             UserAction.find({
                 userId,
                 actionType: { $in: ["like", "skip", "block"] },
+                $or: [
+                    { expiresAt: { $gt: new Date() } },
+                    { actionType: { $in: ["like", "block"] } }
+                ]
             }).distinct("targetUserId"),
             UserAction.find({
                 targetUserId: userId,
@@ -73,20 +77,21 @@ router.get("/discover", auth, async (req, res) => {
         };
 
         if (user.lookingFor === "male") {
-            query.gender = "male";
+            query.$or = [
+                { gender: "male" },
+                { gender: "non-binary", lookingFor: "male" }
+            ];
         } else if (user.lookingFor === "female") {
-            query.gender = "female";
-        } else if (user.lookingFor === "everyone") {
-            query.gender = { $in: ["male", "female", "non-binary"] };
+            query.$or = [
+                { gender: "female" },
+                { gender: "non-binary", lookingFor: "female" }
+            ];
         } else {
             // Default fallback for users who haven't set preferences
             if (user.gender === "male") {
                 query.gender = "female";
-            } else if (user.gender === "female") {
-                query.gender = "male";
             } else {
-                // For non-binary users with no preference, or any other case, show all
-                query.gender = { $in: ["male", "female", "non-binary"] };
+                query.gender = "male";
             }
         }
 
@@ -158,9 +163,9 @@ router.get("/discover", auth, async (req, res) => {
             lookingFor: u.lookingFor,
         }));
 
-        res.json({ 
-            success: true, 
-            users: formatted, 
+        res.json({
+            success: true,
+            users: formatted,
             noResultsInState,
             hasMore: formatted.length === limit,
             page: page
@@ -201,6 +206,7 @@ router.post("/like/:targetId", auth, async (req, res) => {
         if (!liker) return res.status(404).json({ success: false, message: "User not found" });
         await ensureUsageDay(liker);
         const likeCheck = canLike(liker);
+        console.log(`LIKE_CHECK for user ${userId}:`, likeCheck);
         if (!likeCheck.ok) {
             return res.status(403).json({
                 success: false,
@@ -219,6 +225,7 @@ router.post("/like/:targetId", auth, async (req, res) => {
         ]);
 
         liker.usageDaily.likesUsed = (liker.usageDaily.likesUsed || 0) + 1;
+        liker.markModified("usageDaily");
         await liker.save();
 
         // Check mutual like
@@ -420,17 +427,17 @@ router.get("/interactions", auth, async (req, res) => {
 
         // Parallel queries for better performance
         const [likesReceived, profileViews, matches] = await Promise.all([
-            UserAction.find({ 
-                targetUserId: userId, 
+            UserAction.find({
+                targetUserId: userId,
                 actionType: "like",
-                userId: { $nin: blockedUsers } 
+                userId: { $nin: blockedUsers }
             })
                 .populate("userId", "name profilePhotos lastActive state city gender bio dateOfBirth isOnline")
                 .sort({ timestamp: -1 })
                 .limit(50),
-            ProfileView.find({ 
+            ProfileView.find({
                 targetUserId: userId,
-                viewerId: { $nin: blockedUsers } 
+                viewerId: { $nin: blockedUsers }
             })
                 .populate("viewerId", "name profilePhotos lastActive state city gender bio dateOfBirth isOnline")
                 .sort({ viewedAt: -1 })
@@ -658,7 +665,7 @@ router.get("/online-users", auth, async (req, res) => {
 
         const myBlocked = me.blockedUsers || [];
         const ignored = [...myBlocked.map(id => String(id)), ...blockedByThem.map(id => String(id)), String(req.userId)];
-        
+
         // Exclude blocked users, deactivated users, and users pending deletion
         const query = {
             _id: { $nin: ignored },
@@ -666,9 +673,14 @@ router.get("/online-users", auth, async (req, res) => {
             deletionRequestedAt: null
         };
 
-        if (me.gender === "male") query.gender = "female";
-        else if (me.gender === "female") query.gender = "male";
-        else if (me.lookingFor && me.lookingFor !== "everyone") query.gender = me.lookingFor;
+        if (me.lookingFor === "male") {
+            query.$or = [{ gender: "male" }, { gender: "non-binary", lookingFor: "male" }];
+        } else if (me.lookingFor === "female") {
+            query.$or = [{ gender: "female" }, { gender: "non-binary", lookingFor: "female" }];
+        } else {
+            if (me.gender === "male") query.gender = "female";
+            else query.gender = "male";
+        }
 
         const users = await User.find(query)
             .select("name profilePhotos lastActive bio gender state city isOnline createdAt intention lookingFor isVerified accountType subscriptionExpiresAt")
@@ -907,10 +919,10 @@ router.get("/my-likes", auth, async (req, res) => {
         const me = await User.findById(userId);
         const blockedUsers = me?.blockedUsers || [];
 
-        const likesGiven = await UserAction.find({ 
-            userId, 
+        const likesGiven = await UserAction.find({
+            userId,
             actionType: "like",
-            targetUserId: { $nin: blockedUsers } 
+            targetUserId: { $nin: blockedUsers }
         })
             .populate("targetUserId", "name profilePhotos lastActive state city gender bio dateOfBirth isOnline")
             .sort({ timestamp: -1 })

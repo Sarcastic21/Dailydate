@@ -1,6 +1,6 @@
 const { Worker } = require('bullmq');
 const { redisConnection, botCronQueue, botQueue } = require('../queues/botQueue');
-const { executeView, executeLike, executeMessage, processOnlineEngagement, processOfflineEngagement, updateBotOnlineStatus } = require('../services/botInteractionService');
+const { executeView, executeLike, executeMessage, processOnlineEngagement, processOfflineEngagement, processMessageEngagement, updateBotOnlineStatus } = require('../services/botInteractionService');
 const { accountDeletionJob } = require('../services/accountDeletionService');
 const User = require('../models/User');
 
@@ -10,8 +10,8 @@ const interactionWorker = new Worker('botQueue', async (job) => {
 
     // Verify user is still around and legit
     const user = await User.findById(userId);
-    if (!user || user.accountType !== "normal" || !user.isProfileComplete) {
-        console.log(`[BotWorker] Dropped job for ${userId}. user exists: ${!!user}, accountType: ${user?.accountType}, isProfileComplete: ${user?.isProfileComplete}`);
+    if (!user || user.userType !== "real" || !user.isProfileComplete) {
+        console.log(`[BotWorker] Dropped job for ${userId}. user exists: ${!!user}, userType: ${user?.userType}, isProfileComplete: ${user?.isProfileComplete}`);
         return; // Job drops naturally
     }
 
@@ -42,6 +42,8 @@ const cronWorker = new Worker('botCronQueue', async (job) => {
         await processOnlineEngagement();
     } else if (job.name === 'offlineEngagement') {
         await processOfflineEngagement();
+    } else if (job.name === 'messageEngagement') {
+        await processMessageEngagement();
     } else if (job.name === 'botOnlineStatus') {
         await updateBotOnlineStatus();
     } else if (job.name === 'accountDeletion') {
@@ -65,6 +67,11 @@ const setupCrons = async () => {
         await botCronQueue.add('botOnlineStatus', {}, {
             repeat: { every: 600000 }, // Every 10 minutes
             jobId: 'botOnlineStatusJob'
+        });
+
+        await botCronQueue.add('messageEngagement', {}, {
+            repeat: { every: 600000 }, // Every 10 minutes
+            jobId: 'messageEngagementJob'
         });
 
         await botCronQueue.add('accountDeletion', {}, {

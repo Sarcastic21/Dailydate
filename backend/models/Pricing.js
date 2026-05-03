@@ -34,7 +34,7 @@ const pricingSchema = new mongoose.Schema({
     },
     badge: {
         type: String,
-        enum: ['Best Seller', 'Best Value', 'Popular', ''],
+        enum: ['Best Seller', 'Best Value', 'Popular', 'Special', ''],
         default: ''
     },
     badgeEmoji: {

@@ -43,10 +43,12 @@ router.get("/approved", async (req, res) => {
     }
 });
 
+const adminAuth = require("../middleware/adminAuth");
+
 // ─── ADMIN ENDPOINTS ────────────────────────────────────────
 
 /** Fetch all stories (Admin Only) */
-router.get("/admin/all", async (req, res) => {
+router.get("/admin/all", adminAuth, async (req, res) => {
     try {
         // In a real app, add admin auth middleware here. 
         // For now, assuming admin dashboard handles auth.
@@ -58,7 +60,7 @@ router.get("/admin/all", async (req, res) => {
 });
 
 /** Moderate a story (Approve/Reject) */
-router.patch("/admin/moderate/:id", async (req, res) => {
+router.patch("/admin/moderate/:id", adminAuth, async (req, res) => {
     try {
         const { status } = req.body;
         if (!["approved", "rejected", "pending"].includes(status)) {
@@ -80,7 +82,7 @@ router.patch("/admin/moderate/:id", async (req, res) => {
 });
 
 /** Delete a story */
-router.delete("/admin/delete/:id", async (req, res) => {
+router.delete("/admin/delete/:id", adminAuth, async (req, res) => {
     try {
         await SuccessStory.findByIdAndDelete(req.params.id);
         res.json({ success: true, message: "Story deleted successfully" });

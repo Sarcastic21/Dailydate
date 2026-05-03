@@ -18,7 +18,7 @@ const successStorySchema = new mongoose.Schema({
     },
     couplePhoto: {
         url: { type: String, required: true },
-        imagekitId: { type: String, required: true }
+        imagekitId: { type: String, required: false }
     },
     status: {
         type: String,

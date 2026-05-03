@@ -78,11 +78,13 @@ app.use("/api/support", supportRoutes);
 app.use("/api/imagekit", imagekitRoutes);
 app.use("/api", fcmRoutes);
 app.use("/api/notifications", notificationRoutes);
-app.use("/api/payment", require("./routes/payment"));
+app.use("/api/webPayment", require("./routes/webPayment"));
+app.use("/api/appPayment", require("./routes/appPayment"));
 app.use("/api/admin/auth", require("./routes/adminAuth"));
 app.use("/api/admin", adminRoutes);
 app.use("/api/pricing", require("./routes/pricing"));
 app.use("/api/stories", successStoryRoutes);
+app.use("/api/analytics", require("./routes/analytics"));
 
 app.get("/health", (req, res) => res.json({ status: "OK" }));
 
@@ -146,10 +148,12 @@ io.on("connection", (socket) => {
 
             console.log(`User ${uid} registered socket ${socket.id}`);
 
-            await User.findByIdAndUpdate(uid, {
+            const updatedUser = await User.findByIdAndUpdate(uid, {
                 lastActive: new Date(),
                 isOnline: true
-            });
+            }, { new: true });
+            
+            console.log(`User ${uid} marked online. DB Status: ${updatedUser?.isOnline}`);
         } catch (err) {
             console.error("Socket register error:", err);
         }

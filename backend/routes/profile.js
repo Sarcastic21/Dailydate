@@ -18,7 +18,6 @@ router.get("/me", auth, async (req, res) => {
     try {
         const user = await User.findById(req.userId)
             .select("-password -otp -otpExpiry -fcmToken -usageDaily -blockedUsers -registrationStep -__v -phone -notificationPreferences")
-
             .lean();
         if (!user) return res.status(404).json({ message: "Not found", success: false });
         const full = await User.findById(req.userId);
@@ -81,8 +80,8 @@ router.post("/dob", auth, async (req, res) => {
             return res.status(400).json({ message: "Must be 18+", success: false });
 
         await User.findByIdAndUpdate(req.userId, {
-            dateOfBirth: { day, month, year, fullDate },
-            profileCompletionStep: Math.max(1, (await User.findById(req.userId)).profileCompletionStep),
+            $set: { dateOfBirth: { day, month, year, fullDate } },
+            $max: { profileCompletionStep: 1 }
         });
         res.json({ success: true, message: "DOB saved", nextStep: 2 });
     } catch (err) {
@@ -348,7 +347,6 @@ router.put("/update", auth, async (req, res) => {
         if (ageRange) updates.ageRange = ageRange;
         if (maxDistance) updates.maxDistance = maxDistance;
         if (intention) updates.intention = intention;
-        if (lookingFor) updates.lookingFor = lookingFor;
 
         // Handle nested profile details
         if (personality) updates.personality = { ...personality };

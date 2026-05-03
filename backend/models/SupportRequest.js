@@ -25,6 +25,13 @@ const supportRequestSchema = new mongoose.Schema({
         type: String,
         default: ""
     },
+    reply: {
+        type: String,
+        default: ""
+    },
+    repliedAt: {
+        type: Date
+    },
     createdAt: {
         type: Date,
         default: Date.now

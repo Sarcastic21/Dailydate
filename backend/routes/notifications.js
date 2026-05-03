@@ -3,31 +3,47 @@ const mongoose = require("mongoose");
 const auth = require("../middleware/auth");
 const Notification = require("../models/Notification");
 const User = require("../models/User");
-const { updateNotificationPreferences } = require("../services/notificationService");
+const { 
+    getUserNotifications, 
+    markNotificationAsRead, 
+    markAllNotificationsAsRead,
+    updateNotificationPreferences 
+} = require("../services/notificationService");
 const { hasPremiumAccess } = require("../services/subscription");
 
 const router = express.Router();
 
 router.get("/", auth, async (req, res) => {
     try {
-        const notifications = await Notification.find({ userId: req.userId })
-            .sort({ createdAt: -1 })
-            .limit(100)
-            .lean();
+        const { page = 1, limit = 100 } = req.query;
+        const result = await getUserNotifications(req.userId, parseInt(page), parseInt(limit));
+        const notifications = result.notifications;
 
         const currentUser = await User.findById(req.userId).select("accountType subscriptionExpiresAt blockedUsers");
         const isPremium = hasPremiumAccess(currentUser);
         const blockedUsers = currentUser.blockedUsers || [];
         const blockedUserIds = new Set(blockedUsers.map(id => String(id)));
 
-        // Filter out notifications from blocked users
+        // Filter out notifications from blocked users and self-notifications
         const filteredNotifications = notifications.filter(n => {
+            // Never filter out global notifications
+            if (n.type === 'global' || n.data?.isGlobal) return true;
+
             const senderId = n.data?.senderId || n.data?.viewerId;
-            return !blockedUserIds.has(String(senderId));
+            // Skip blocked users
+            if (blockedUserIds.has(String(senderId))) return false;
+            // Skip self-notifications (user triggered action on themselves)
+            if (senderId && String(senderId) === String(req.userId)) return false;
+            return true;
         });
 
         if (!isPremium) {
-            return res.json({ success: true, notifications: filteredNotifications });
+            return res.json({ 
+                success: true, 
+                notifications: filteredNotifications,
+                pagination: result.pagination,
+                unread: result.unread
+            });
         }
 
         // Identify unique IDs of users involved in locked notifications
@@ -98,7 +114,12 @@ router.get("/", auth, async (req, res) => {
             };
         });
 
-        res.json({ success: true, notifications: processedNotifications });
+        res.json({ 
+            success: true, 
+            notifications: processedNotifications,
+            pagination: result.pagination,
+            unread: result.unread
+        });
     } catch (err) {
         console.error("notifications list:", err);
         res.status(500).json({ success: false, message: "Server error" });
@@ -113,12 +134,8 @@ router.get("/unread-count", auth, async (req, res) => {
         const theyBlockedMe = blockedByThem.map(u => String(u._id));
         const allExclusions = [...blockedByMe.map(id => String(id)), ...theyBlockedMe];
 
-        const count = await Notification.countDocuments({ 
-            userId: req.userId, 
-            read: false,
-            "data.senderId": { $nin: allExclusions }
-        });
-        res.json({ success: true, count });
+        const result = await getUserNotifications(req.userId);
+        res.json({ success: true, count: result.unread });
     } catch (err) {
         res.status(500).json({ success: false, message: "Server error" });
     }
@@ -165,12 +182,9 @@ router.get("/unread-breakdown", auth, async (req, res) => {
 
 router.patch("/:id/read", auth, async (req, res) => {
     try {
-        const result = await Notification.updateOne(
-            { _id: req.params.id, userId: req.userId },
-            { read: true }
-        );
-        if (result.matchedCount === 0) {
-            return res.status(404).json({ success: false, message: "Not found" });
+        const success = await markNotificationAsRead(req.params.id, req.userId);
+        if (!success) {
+            return res.status(404).json({ success: false, message: "Not found or already read" });
         }
         res.json({ success: true });
     } catch (err) {
@@ -180,8 +194,8 @@ router.patch("/:id/read", auth, async (req, res) => {
 
 router.post("/read-all", auth, async (req, res) => {
     try {
-        await Notification.updateMany({ userId: req.userId, read: false }, { read: true });
-        res.json({ success: true });
+        const count = await markAllNotificationsAsRead(req.userId);
+        res.json({ success: true, count });
     } catch (err) {
         res.status(500).json({ success: false, message: "Server error" });
     }

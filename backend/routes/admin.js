@@ -6,11 +6,13 @@ const UserAction = require("../models/UserAction");
 const Match = require("../models/Match");
 const Message = require("../models/Message");
 const Notification = require("../models/Notification");
+const GlobalNotification = require("../models/GlobalNotification");
 const axios = require("axios");
 const { State, City } = require("country-state-city");
 const { redisConnection } = require("../queues/botQueue");
 const bcrypt = require("bcryptjs");
 const adminAuth = require("../middleware/adminAuth");
+const { createNotification, sendBulkFCMNotifications } = require("../services/notificationService");
 
 // Apply admin authentication to all admin routes
 router.use(adminAuth);
@@ -136,7 +138,7 @@ const generateRandomData = (gender, selectedState) => {
     }
 
     const intentions = ["Marriage", "Serious Relationship", "Dating", "Casual", "Friendship", "Not Sure Yet"];
-    const lookingForOptions = gender === "male" ? ["female", "everyone"] : ["male", "everyone"];
+    const lookingForOptions = gender === "male" ? ["female"] : ["male"];
 
     // Personality options
     const personalityTypes = ["Introvert", "Extrovert", "Ambivert", ""];
@@ -483,7 +485,7 @@ router.post("/insert-bot-users", async (req, res) => {
 
             // ── Sanitize enum fields so invalid values don't cause validation errors ──
             const VALID_INTENTIONS = ["Marriage", "Serious Relationship", "Dating", "Casual", "Friendship", "Not Sure Yet", ""];
-            const VALID_LOOKING_FOR = ["male", "female", "everyone", ""];
+            const VALID_LOOKING_FOR = ["male", "female", ""];
             const VALID_STATUS = ["married", "single", "divorced", ""];
             const VALID_ACCOUNT_TYPES = ["normal", "gold"];
 
@@ -555,24 +557,37 @@ router.post("/insert-bot-users", async (req, res) => {
 // Get all bot users
 router.get("/bot-users", async (req, res) => {
     try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 20;
+        const { page = 1, limit = 20, search = "", gender = "" } = req.query;
         const skip = (page - 1) * limit;
 
-        const botUsers = await User.find({ userType: "bot" })
+        const query = { userType: "bot" };
+
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: "i" } },
+                { email: { $regex: search, $options: "i" } },
+                { phone: { $regex: search, $options: "i" } }
+            ];
+        }
+
+        if (gender) {
+            query.gender = gender;
+        }
+
+        const botUsers = await User.find(query)
             .select("-password -otp -otpExpiry")
             .sort({ createdAt: -1 })
             .skip(skip)
-            .limit(limit);
+            .limit(parseInt(limit));
 
-        const total = await User.countDocuments({ userType: "bot" });
+        const total = await User.countDocuments(query);
 
         res.json({
             success: true,
             users: botUsers,
             pagination: {
-                page,
-                limit,
+                page: parseInt(page),
+                limit: parseInt(limit),
                 total,
                 pages: Math.ceil(total / limit)
             }
@@ -586,8 +601,7 @@ router.get("/bot-users", async (req, res) => {
 // Get all real users (exclude pending deletion)
 router.get("/real-users", async (req, res) => {
     try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 20;
+        const { page = 1, limit = 20, search = "", gender = "" } = req.query;
         const skip = (page - 1) * limit;
 
         const query = {
@@ -595,11 +609,23 @@ router.get("/real-users", async (req, res) => {
             deletionRequestedAt: null // Exclude users pending deletion
         };
 
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: "i" } },
+                { email: { $regex: search, $options: "i" } },
+                { phone: { $regex: search, $options: "i" } }
+            ];
+        }
+
+        if (gender) {
+            query.gender = gender;
+        }
+
         const realUsers = await User.find(query)
             .select("-password -otp -otpExpiry")
             .sort({ createdAt: -1 })
             .skip(skip)
-            .limit(limit);
+            .limit(parseInt(limit));
 
         const total = await User.countDocuments(query);
 
@@ -607,8 +633,8 @@ router.get("/real-users", async (req, res) => {
             success: true,
             users: realUsers,
             pagination: {
-                page,
-                limit,
+                page: parseInt(page),
+                limit: parseInt(limit),
                 total,
                 pages: Math.ceil(total / limit)
             }
@@ -616,6 +642,48 @@ router.get("/real-users", async (req, res) => {
     } catch (error) {
         console.error("Error fetching real users:", error);
         res.status(500).json({ success: false, message: "Failed to fetch real users" });
+    }
+});
+
+// Get all users for subscription management
+router.get("/subscriptions", async (req, res) => {
+    try {
+        const { page = 1, limit = 20, search = "", accountType = "" } = req.query;
+        const skip = (page - 1) * limit;
+
+        const query = { userType: "real" };
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: "i" } },
+                { email: { $regex: search, $options: "i" } },
+                { phone: { $regex: search, $options: "i" } }
+            ];
+        }
+        if (accountType) {
+            query.accountType = accountType;
+        }
+
+        const users = await User.find(query)
+            .select("name email phone accountType subscriptionStart subscriptionExpiresAt subscriptionRenewal subscriptionStatus profilePhotos")
+            .sort({ subscriptionStart: -1 })
+            .skip(skip)
+            .limit(parseInt(limit));
+
+        const total = await User.countDocuments(query);
+
+        res.json({
+            success: true,
+            users,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / limit)
+            }
+        });
+    } catch (error) {
+        console.error("Error fetching subscriptions:", error);
+        res.status(500).json({ success: false, message: "Failed to fetch subscription data" });
     }
 });
 
@@ -639,6 +707,60 @@ router.put("/user/:userId", async (req, res) => {
     } catch (error) {
         console.error("Error updating user:", error);
         res.status(500).json({ success: false, message: "Failed to update user" });
+    }
+});
+
+// Admin Reset Password for a User
+router.post("/reset-password", async (req, res) => {
+    try {
+        const { userId, newPassword } = req.body;
+        if (!userId || !newPassword) {
+            return res.status(400).json({ success: false, message: "User ID and new password are required" });
+        }
+        if (newPassword.length < 6) {
+            return res.status(400).json({ success: false, message: "Password must be at least 6 characters long" });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        user.password = hashedPassword;
+        await user.save();
+
+        res.json({ success: true, message: "Password reset successfully" });
+    } catch (error) {
+        console.error("Error resetting password:", error);
+        res.status(500).json({ success: false, message: "Failed to reset password" });
+    }
+});
+
+// Get Session History for a User
+router.get("/user/:userId/history", async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const SessionHistory = require("../models/SessionHistory");
+        
+        const history = await SessionHistory.find({ userId }).sort({ date: -1 }).limit(30); // Last 30 days
+        
+        // Calculate total logins
+        let totalLogins = 0;
+        history.forEach(h => {
+            totalLogins += h.loginCount;
+        });
+
+        res.json({ 
+            success: true, 
+            history,
+            totals: {
+                totalLogins
+            }
+        });
+    } catch (error) {
+        console.error("Error fetching session history:", error);
+        res.status(500).json({ success: false, message: "Failed to fetch session history" });
     }
 });
 
@@ -1000,6 +1122,270 @@ router.delete("/user/:id", async (req, res) => {
     } catch (error) {
         console.error("Error deleting user:", error);
         res.status(500).json({ success: false, message: "Failed to delete user" });
+    }
+});
+
+// Get Global Daily Usage Analytics
+router.get("/analytics/daily-usage", async (req, res) => {
+    try {
+        const SessionHistory = require("../models/SessionHistory");
+        
+        // Fetch last 14 days of data
+        const stats = await SessionHistory.aggregate([
+            {
+                $group: {
+                    _id: "$date",
+                    totalLogins: { $sum: "$loginCount" },
+                    activeUsers: { $sum: 1 }
+                }
+            },
+            { $sort: { _id: -1 } },
+            { $limit: 14 }
+        ]);
+
+        res.json({ success: true, stats });
+    } catch (error) {
+        console.error("Error fetching daily usage stats:", error);
+        res.status(500).json({ success: false, message: "Failed to fetch daily usage stats" });
+    }
+});
+
+// Get Detailed Daily Usage for a specific date (with pagination)
+router.get("/analytics/usage/:date", async (req, res) => {
+    try {
+        const SessionHistory = require("../models/SessionHistory");
+        const { date } = req.params;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const skip = (page - 1) * limit;
+
+        const [sessions, totalCount] = await Promise.all([
+            SessionHistory.find({ date })
+                .populate("userId", "name email profilePhotos phone isOnline")
+                .sort({ loginCount: -1 })
+                .skip(skip)
+                .limit(limit),
+            SessionHistory.countDocuments({ date })
+        ]);
+
+        res.json({ 
+            success: true, 
+            sessions,
+            hasMore: totalCount > skip + sessions.length,
+            totalCount
+        });
+    } catch (error) {
+        console.error("Error fetching detailed daily usage:", error);
+        res.status(500).json({ success: false, message: "Failed to fetch detailed daily usage" });
+    }
+});
+
+// --- CHAT CONTROL ADVANCED FEATURES ---
+
+// Search users for Chat Control
+router.get("/chats/search-users", async (req, res) => {
+    try {
+        const { search = "", gender = "", page = 1 } = req.query;
+        const limit = 20;
+        const skip = (parseInt(page) - 1) * limit;
+
+        const query = {
+            userType: "real",
+            deletionRequestedAt: null
+        };
+
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: "i" } },
+                { email: { $regex: search, $options: "i" } },
+                { phone: { $regex: search, $options: "i" } }
+            ];
+        }
+
+        if (gender) {
+            query.gender = gender;
+        }
+
+        const [users, total] = await Promise.all([
+            User.find(query)
+                .select("name email phone gender profilePhotos isOnline lastActive")
+                .sort({ lastActive: -1 })
+                .skip(skip)
+                .limit(limit),
+            User.countDocuments(query)
+        ]);
+        
+        res.json({ 
+            success: true, 
+            users,
+            pagination: {
+                page: parseInt(page),
+                limit,
+                total,
+                pages: Math.ceil(total / limit)
+            }
+        });
+    } catch (error) {
+        console.error("Error searching users for chat:", error);
+        res.status(500).json({ success: false, message: "Search failed" });
+    }
+});
+
+// Get matches for a specific user
+router.get("/chats/user/:userId/matches", async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const matches = await Match.find({
+            $or: [{ user1Id: userId }, { user2Id: userId }],
+            status: "matched"
+        })
+        .populate("user1Id user2Id", "name email profilePhotos isOnline")
+        .sort({ updatedAt: -1 });
+
+        res.json({ success: true, matches });
+    } catch (error) {
+        console.error("Error fetching matches for user:", error);
+        res.status(500).json({ success: false, message: "Failed to fetch matches" });
+    }
+});
+
+// Get full message history for a match
+router.get("/chats/match/:matchId/messages", async (req, res) => {
+    try {
+        const messages = await Message.find({ matchId: req.params.matchId })
+            .sort({ createdAt: 1 })
+            .limit(200); // Fetch last 200 messages for oversight
+            
+        res.json({ success: true, messages });
+    } catch (error) {
+        console.error("Error fetching messages:", error);
+        res.status(500).json({ success: false, message: "Failed to fetch messages" });
+    }
+});
+
+// Send a message into a chat (Admin Intervention)
+router.post("/chats/match/:matchId/send", async (req, res) => {
+    try {
+        const { matchId } = req.params;
+        const { senderId, content } = req.body;
+        
+        if (!content || !senderId) {
+            return res.status(400).json({ success: false, message: "Sender and content required" });
+        }
+
+        const message = await Message.create({
+            matchId,
+            senderId,
+            content,
+            isRead: false
+        });
+
+        // Update match's updatedAt to bubble it to the top of the chat list
+        await Match.findByIdAndUpdate(matchId, { updatedAt: new Date() });
+
+        res.json({ success: true, message });
+    } catch (error) {
+        console.error("Error sending admin intervention message:", error);
+        res.status(500).json({ success: false, message: "Failed to send message" });
+    }
+});
+
+// Send bulk notifications
+router.post("/send-bulk-notification", async (req, res) => {
+    try {
+        const { target, title, body } = req.body;
+
+        if (!target || !title || !body) {
+            return res.status(400).json({ success: false, message: "Target, title, and body are required" });
+        }
+
+        let query = { userType: "real" };
+        if (target === "male") query.gender = "male";
+        else if (target === "female") query.gender = "female";
+
+        const users = await User.find(query).select("_id fcmToken");
+
+        if (users.length === 0) {
+            return res.status(404).json({ success: false, message: "No users found for the selected target" });
+        }
+
+        // 1. Create a GlobalNotification log
+        const globalNotif = new GlobalNotification({
+            title,
+            body,
+            target,
+            userCount: users.length
+        });
+        await globalNotif.save();
+
+        // 2. We no longer bulk insert into Notification collection.
+        // Instead, we will fetch global notifications dynamically in the service.
+
+        // 3. Send FCM in background batches
+        const fcmTokens = users.filter(u => u.fcmToken).map(u => u.fcmToken);
+        if (fcmTokens.length > 0) {
+            sendBulkFCMNotifications(fcmTokens, title, body, { from: "DailyDate", type: "global", globalId: globalNotif._id.toString() })
+                .then(() => {
+                    globalNotif.isPushSent = true;
+                    globalNotif.save();
+                })
+                .catch(err => console.error("FCM Bulk Error:", err));
+        }
+
+        res.json({ 
+            success: true, 
+            message: `Global notification posted and push sent to ${users.length} users.`,
+            campaignId: globalNotif._id
+        });
+    } catch (error) {
+        console.error("Bulk notification error:", error);
+        res.status(500).json({ success: false, message: "Failed to send bulk notifications" });
+    }
+});
+
+// ---------------------------------------
+
+// Get all global notifications
+router.get("/global-notifications", async (req, res) => {
+    try {
+        const notifications = await GlobalNotification.find().sort({ createdAt: -1 });
+        res.json({ success: true, notifications });
+    } catch (error) {
+        console.error("Fetch global notifications error:", error);
+        res.status(500).json({ success: false, message: "Failed to fetch notifications" });
+    }
+});
+
+// Update global notification
+router.put("/global-notifications/:id", async (req, res) => {
+    try {
+        const { title, body, target } = req.body;
+        const notification = await GlobalNotification.findByIdAndUpdate(
+            req.params.id,
+            { title, body, target },
+            { new: true }
+        );
+        if (!notification) {
+            return res.status(404).json({ success: false, message: "Notification not found" });
+        }
+        res.json({ success: true, message: "Notification updated successfully", notification });
+    } catch (error) {
+        console.error("Update global notification error:", error);
+        res.status(500).json({ success: false, message: "Failed to update notification" });
+    }
+});
+
+// Delete global notification
+router.delete("/global-notifications/:id", async (req, res) => {
+    try {
+        const notification = await GlobalNotification.findByIdAndDelete(req.params.id);
+        if (!notification) {
+            return res.status(404).json({ success: false, message: "Notification not found" });
+        }
+        res.json({ success: true, message: "Notification deleted successfully" });
+    } catch (error) {
+        console.error("Delete global notification error:", error);
+        res.status(500).json({ success: false, message: "Failed to delete notification" });
     }
 });
 

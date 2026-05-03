@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Pricing = require('../models/Pricing');
 const auth = require('../middleware/auth');
+const adminAuth = require('../middleware/adminAuth');
 
 // Get all pricing plans (public endpoint)
 router.get('/plans', async (req, res) => {
@@ -61,7 +62,7 @@ router.get('/plans/:id', async (req, res) => {
 });
 
 // Admin: Get all pricing plans (including inactive)
-router.get('/admin/plans', async (req, res) => {
+router.get('/admin/plans', adminAuth, async (req, res) => {
     try {
 
         const plans = await Pricing.find().sort({ durationMonths: 1 });
@@ -75,7 +76,7 @@ router.get('/admin/plans', async (req, res) => {
 });
 
 // Admin: Create new pricing plan
-router.post('/admin/plans', async (req, res) => {
+router.post('/admin/plans', adminAuth, async (req, res) => {
     try {
 
         const {
@@ -114,7 +115,7 @@ router.post('/admin/plans', async (req, res) => {
 });
 
 // Admin: Update pricing plan
-router.put('/admin/plans/:id', async (req, res) => {
+router.put('/admin/plans/:id', adminAuth, async (req, res) => {
     try {
 
         const {
@@ -152,7 +153,7 @@ router.put('/admin/plans/:id', async (req, res) => {
 });
 
 // Admin: Delete pricing plan
-router.delete('/admin/plans/:id', async (req, res) => {
+router.delete('/admin/plans/:id', adminAuth, async (req, res) => {
     try {
 
         const plan = await Pricing.findByIdAndDelete(req.params.id);
@@ -167,7 +168,7 @@ router.delete('/admin/plans/:id', async (req, res) => {
 });
 
 // Admin: Initialize default pricing plans
-router.post('/admin/plans/initialize', async (req, res) => {
+router.post('/admin/plans/initialize', adminAuth, async (req, res) => {
     try {
 
         const defaultPlans = [

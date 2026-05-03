@@ -91,10 +91,17 @@ router.get("/conversations", auth, async (req, res) => {
             // Get last message content dynamically
             const lastMessage = await Message.findOne({ matchId: match._id })
                 .sort({ createdAt: -1 })
-                .select("content senderId createdAt");
+                .select("content senderId createdAt readStatus");
 
             // Requirement: Only show matches that have at least one message AND at least one message was sent by a premium user.
             if (!lastMessage) return null;
+
+            // Count unread messages for this user in this conversation
+            const unreadCount = await Message.countDocuments({
+                matchId: match._id,
+                receiverId: userId,
+                "readStatus.read": false
+            });
 
             const senderId = lastMessage.senderId;
             const senderDoc = await User.findById(senderId).select("accountType subscriptionExpiresAt userType");
@@ -119,8 +126,10 @@ router.get("/conversations", auth, async (req, res) => {
                 lastMessage: {
                     content: lastMessage.content,
                     senderId: lastMessage.senderId,
-                    createdAt: lastMessage.createdAt
+                    createdAt: lastMessage.createdAt,
+                    readStatus: lastMessage.readStatus
                 },
+                unreadCount,
                 matchedAt: match.matchedAt,
                 isApproved: match.isApproved,
                 // Sort by last message time (most recent first)

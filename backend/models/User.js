@@ -33,17 +33,25 @@ const userSchema = new mongoose.Schema({
     },
 
     // ── Preferences ─────────────────────────────────────
-    lookingFor: { type: String, enum: ["male", "female", "everyone", ""], default: "" },
+    lookingFor: { type: String, enum: ["male", "female", ""], default: "" },
     intention: { type: String, enum: ["Marriage", "Serious Relationship", "Dating", "Casual", "Friendship", "Not Sure Yet", ""], default: "" },
     ageRange: { min: { type: Number, default: 18 }, max: { type: Number, default: 35 } },
     maxDistance: { type: Number, default: 50 },
 
-    // ── Account & subscription ──────────────────────────
+    // ── Account & Subscription ──────────────────────────
     userType: { type: String, enum: ["real", "bot"], default: "real" },
     status: { type: String, enum: ["married", "single", "divorced", ""], default: "" },
     accountType: { type: String, enum: ["normal", "gold"], default: "normal" },
-    /** Active until this instant; messaging/likes limits use subscription + usageDaily */
-    subscriptionExpiresAt: { type: Date, default: null },
+    
+    // Unified Subscription Data
+    subscriptionStart: { type: Date, default: null },
+    subscriptionExpiresAt: { type: Date, default: null }, 
+    subscriptionRenewal: { type: Date, default: null },
+    subscriptionStatus: { 
+        type: String, 
+        enum: ['none', 'active', 'expired', 'cancelled'],
+        default: 'none'
+    },
     /** Resets daily (UTC date string YYYY-MM-DD) */
     usageDaily: {
         date: { type: String, default: "" },
@@ -108,16 +116,6 @@ const userSchema = new mongoose.Schema({
         profileViews: { type: Number, default: 0 },
     },
 
-    // ── Subscription ──────────────────────────────────────
-    subscriptionStart: { type: Date, default: null },
-    subscriptionExpiry: { type: Date, default: null },
-    subscriptionRenewal: { type: Date, default: null },
-    subscriptionStatus: { 
-        type: String, 
-        enum: ['none', 'active', 'expired', 'cancelled'],
-        default: 'none'
-    },
-
     // ── Deactivation & Deletion ──────────────────────────
     deletionRequestedAt: { type: Date, default: null },
     isDeactivated: { type: Boolean, default: false },
@@ -135,6 +133,7 @@ userSchema.index({ state: 1, lastActive: -1 });
 userSchema.index({ gender: 1, lastActive: -1 });
 userSchema.index({ "dateOfBirth.fullDate": 1 });
 userSchema.index({ isOnline: 1, lastActive: -1 });
+userSchema.index({ userType: 1, createdAt: -1 });
 userSchema.index({ fcmToken: 1 });
 
 module.exports = mongoose.model("User", userSchema);
