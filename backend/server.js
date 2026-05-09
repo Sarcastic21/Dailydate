@@ -401,6 +401,12 @@ process.on('unhandledRejection', (err) => {
         process.exit(1);
     });
 });
+app.get("/", (req, res) => {
+  res.send("Backend is running 🚀");
+});
+app.get("/health", (req, res) => {
+  res.status(200).send("OK");
+});
 
 const PORT = process.env.PORT || 5000;
 // Listen on all interfaces so physical phones on LAN can reach your machine
