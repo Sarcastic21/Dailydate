@@ -1,4 +1,5 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const User = require("../models/User");
 const Match = require("../models/Match");
 const UserAction = require("../models/UserAction");
@@ -532,18 +533,39 @@ router.get("/user/:userId", auth, async (req, res) => {
         const targetUserId = req.params.userId;
         const userId = req.userId;
 
-        const [targetUser, currentUser] = await Promise.all([
-            User.findById(targetUserId).select("name profilePhotos dateOfBirth gender bio stats lastActive state city isOnline intention lookingFor personality lifestyle physical beliefs accountType subscriptionExpiresAt isVerified blockedUsers"),
-            User.findById(userId).select("blockedUsers")
-        ]);
+        console.log("[Profile] Fetching user profile:", { 
+            targetUserId, 
+            targetUserIdType: typeof targetUserId,
+            targetUserIdLength: targetUserId?.length,
+            requestingUserId: userId 
+        });
 
-        if (!targetUser) return res.status(404).json({ message: "Not found", success: false });
+        const targetUser = await User.findById(targetUserId).select("-password -otp -otpExpiry -fcmToken -usageDaily -registrationStep -__v -phone -notificationPreferences");
+        const currentUser = await User.findById(userId).select("blockedUsers");
+
+        console.log("[Profile] Query result:", { 
+            targetUserFound: !!targetUser, 
+            currentUserFound: !!currentUser 
+        });
+
+        if (!targetUser) {
+            console.log("[Profile] User not found in database:", targetUserId);
+            return res.status(404).json({ message: "Not found", success: false });
+        }
 
         // Security Guard: Check if blocked (either way)
         const myBlocked = currentUser?.blockedUsers || [];
         const theirBlocked = targetUser?.blockedUsers || [];
-        if (myBlocked.includes(targetUserId) || theirBlocked.includes(userId)) {
-            return res.status(403).json({ message: "Access restricted", success: false, code: "BLOCKED" });
+        console.log("[Profile] Checking blocked status:", { myBlocked, theirBlocked, targetUserId, userId });
+        
+        try {
+            if (myBlocked.map(String).includes(String(targetUserId)) || theirBlocked.map(String).includes(String(userId))) {
+                console.log("[Profile] User blocked:", { myBlocked, theirBlocked, targetUserId, userId });
+                return res.status(403).json({ message: "Access restricted", success: false, code: "BLOCKED" });
+            }
+        } catch (err) {
+            console.error("[Profile] Error checking blocked status:", err);
+            return res.status(500).json({ message: "Server error checking blocked status", success: false });
         }
 
         const user = targetUser;
@@ -551,31 +573,41 @@ router.get("/user/:userId", auth, async (req, res) => {
         let recordedNewProfileView = false;
         // Record a view if not viewing self
         if (String(userId) !== String(targetUserId)) {
-            const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-            const recentView = await ProfileView.findOne({
-                viewerId: userId,
-                targetUserId,
-                viewedAt: { $gte: oneHourAgo }
-            });
+            try {
+                const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+                const recentView = await ProfileView.findOne({
+                    viewerId: userId,
+                    targetUserId,
+                    viewedAt: { $gte: oneHourAgo }
+                });
 
-            if (!recentView) {
-                await ProfileView.create({ viewerId: userId, targetUserId });
-                await User.findByIdAndUpdate(targetUserId, { $inc: { "stats.profileViews": 1 } });
-                recordedNewProfileView = true;
+                if (!recentView) {
+                    await ProfileView.create({ viewerId: userId, targetUserId });
+                    await User.findByIdAndUpdate(targetUserId, { $inc: { "stats.profileViews": 1 } });
+                    recordedNewProfileView = true;
+                }
+            } catch (err) {
+                console.error("[Profile] Error recording profile view:", err);
             }
         }
 
-        const hasLiked = await UserAction.exists({
-            userId,
-            targetUserId,
-            actionType: "like"
-        });
-        const isMatch = await Match.exists({
-            $or: [
-                { user1Id: userId, user2Id: targetUserId },
-                { user1Id: targetUserId, user2Id: userId }
-            ]
-        });
+        let hasLiked = false;
+        let isMatch = false;
+        try {
+            hasLiked = await UserAction.exists({
+                userId,
+                targetUserId,
+                actionType: "like"
+            });
+            isMatch = await Match.exists({
+                $or: [
+                    { user1Id: userId, user2Id: targetUserId },
+                    { user1Id: targetUserId, user2Id: userId }
+                ]
+            });
+        } catch (err) {
+            console.error("[Profile] Error checking like/match status:", err);
+        }
 
         const age = calculateAge(user.dateOfBirth?.fullDate);
         const tier = user.subscription?.effectiveTier || user.accountType || 'normal';
