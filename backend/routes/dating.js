@@ -13,6 +13,7 @@ const { createNotification } = require("../services/notificationService");
 const {
     ensureUsageDay,
     canLike,
+    incrementDailyLike,
     hasPremiumAccess,
     buildSubscriptionPayload,
 } = require("../services/subscription");
@@ -221,12 +222,9 @@ router.post("/like/:targetId", auth, async (req, res) => {
                 { userId, targetUserId: targetId, actionType: "like", timestamp: new Date() },
                 { upsert: true }
             ),
-            User.findByIdAndUpdate(targetId, { $inc: { "stats.totalLikes": 1 } })
+            User.findByIdAndUpdate(targetId, { $inc: { "stats.totalLikes": 1 } }),
+            incrementDailyLike(liker)
         ]);
-
-        liker.usageDaily.likesUsed = (liker.usageDaily.likesUsed || 0) + 1;
-        liker.markModified("usageDaily");
-        await liker.save();
 
         // Check mutual like
         const mutual = await UserAction.findOne({
@@ -309,8 +307,8 @@ router.post("/like/:targetId", auth, async (req, res) => {
                 senderId: String(userId),
                 senderName,
                 senderPhoto,
-                senderCity: me ? me.city : "",
-                senderState: me ? me.state : "",
+                senderCity: liker ? liker.city : "",
+                senderState: liker ? liker.state : "",
                 matchId: matchId ? String(matchId) : "",
                 isLocked: !isTargetPremium,
             });
@@ -771,6 +769,13 @@ router.post("/block/:userId", auth, async (req, res) => {
         user.blockedUsers.push(blockedId);
         await user.save();
 
+        // 1.5 Mirror in UserAction for discovery exclusion
+        await UserAction.findOneAndUpdate(
+            { userId: blockerId, targetUserId: blockedId, actionType: "block" },
+            { userId: blockerId, targetUserId: blockedId, actionType: "block", timestamp: new Date() },
+            { upsert: true }
+        );
+
         // 2. Mark any existing match as blocked instead of deleting it
         await Match.updateMany({
             $or: [
@@ -903,6 +908,13 @@ router.post("/report/:userId", auth, async (req, res) => {
         if (!user.blockedUsers.includes(reportedId)) {
             user.blockedUsers.push(reportedId);
             await user.save();
+
+            // Also mirror in UserAction for discovery exclusion
+            await UserAction.findOneAndUpdate(
+                { userId: reporterId, targetUserId: reportedId, actionType: "block" },
+                { userId: reporterId, targetUserId: reportedId, actionType: "block", timestamp: new Date() },
+                { upsert: true }
+            );
         }
 
         res.json({ success: true, message: "Report submitted successfully" });

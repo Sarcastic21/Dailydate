@@ -56,9 +56,11 @@ const userSchema = new mongoose.Schema({
     usageDaily: {
         date: { type: String, default: "" },
         likesUsed: { type: Number, default: 0 },
+        lastLikeAt: { type: Date, default: null },
         /** Gold: distinct match partners messaged today (max 50 new threads/day) */
         messageRecipientIds: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     },
+    unreadNotificationCount: { type: Number, default: 0 },
     isProfileComplete: { type: Boolean, default: false },
     profileCompletionStep: { type: Number, default: 0 },
     lastActive: { type: Date, default: Date.now },

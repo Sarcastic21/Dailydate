@@ -24,7 +24,6 @@ async function ensureUsageDay(user) {
     const today = todayYMD();
     if (user.usageDaily.date !== today) {
         user.usageDaily.date = today;
-        user.usageDaily.likesUsed = 0;
         user.usageDaily.messageRecipientIds = [];
         await user.save();
     }
@@ -33,13 +32,23 @@ async function ensureUsageDay(user) {
 function canLike(user) {
     const tier = getEffectiveTier(user);
     if (tier !== "normal") return { ok: true };
+
     const used = user.usageDaily?.likesUsed || 0;
-    if (used >= 10) {
-        return {
-            ok: false,
-            code: "DAILY_LIKE_LIMIT",
-            message: "You have used all 10 free likes today. Upgrade for unlimited likes.",
-        };
+    const lastLikeAt = user.usageDaily?.lastLikeAt;
+
+    if (used >= 10 && lastLikeAt) {
+        const now = new Date();
+        const diffMs = now - new Date(lastLikeAt);
+        const diffHours = diffMs / (1000 * 60 * 60);
+
+        if (diffHours < 24) {
+            const remainingHours = Math.ceil(24 - diffHours);
+            return {
+                ok: false,
+                code: "DAILY_LIKE_LIMIT",
+                message: `You have used all 10 free likes. Please wait ${remainingHours} hours or upgrade to Premium for unlimited likes.`,
+            };
+        }
     }
     return { ok: true };
 }
@@ -70,8 +79,26 @@ function canSendMessage(user, receiverId) {
 }
 
 async function incrementDailyLike(user) {
-    await ensureUsageDay(user);
+    const now = new Date();
+    
+    if (!user.usageDaily) {
+        user.usageDaily = { date: todayYMD(), likesUsed: 0, lastLikeAt: null, messageRecipientIds: [] };
+    }
+
+    const lastLikeAt = user.usageDaily.lastLikeAt;
+    if (lastLikeAt) {
+        const diffMs = now - new Date(lastLikeAt);
+        if (diffMs >= 24 * 60 * 60 * 1000) {
+            // If 24 hours have passed, reset the count
+            user.usageDaily.likesUsed = 0;
+        }
+    }
+
     user.usageDaily.likesUsed = (user.usageDaily.likesUsed || 0) + 1;
+    user.usageDaily.lastLikeAt = now;
+    user.usageDaily.date = todayYMD(); // Keep date for compatibility
+    
+    user.markModified("usageDaily");
     await user.save();
 }
 

@@ -128,14 +128,8 @@ router.get("/", auth, async (req, res) => {
 
 router.get("/unread-count", auth, async (req, res) => {
     try {
-        const me = await User.findById(req.userId).select("blockedUsers");
-        const blockedByMe = me?.blockedUsers || [];
-        const blockedByThem = await User.find({ blockedUsers: req.userId }).select("_id").lean();
-        const theyBlockedMe = blockedByThem.map(u => String(u._id));
-        const allExclusions = [...blockedByMe.map(id => String(id)), ...theyBlockedMe];
-
-        const result = await getUserNotifications(req.userId);
-        res.json({ success: true, count: result.unread });
+        const user = await User.findById(req.userId).select("unreadNotificationCount");
+        res.json({ success: true, count: user?.unreadNotificationCount || 0 });
     } catch (err) {
         res.status(500).json({ success: false, message: "Server error" });
     }
@@ -206,10 +200,17 @@ router.post("/read-by-type", auth, async (req, res) => {
         const { type } = req.body;
         if (!type) return res.status(400).json({ success: false, message: "Type required" });
 
-        await Notification.updateMany(
+        const result = await Notification.updateMany(
             { userId: req.userId, type, read: false },
             { read: true }
         );
+        
+        if (result.modifiedCount > 0) {
+            // Recalculate unread count to be safe, or decrement by modifiedCount
+            const unreadCount = await Notification.countDocuments({ userId: req.userId, read: false });
+            await User.findByIdAndUpdate(req.userId, { unreadNotificationCount: unreadCount });
+        }
+        
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ success: false, message: "Server error" });

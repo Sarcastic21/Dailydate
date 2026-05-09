@@ -1389,4 +1389,37 @@ router.delete("/global-notifications/:id", async (req, res) => {
     }
 });
 
+// ─── REPORTS & BLOCKS ─────────────────────────────────────────
+const Report = require("../models/Report");
+
+router.get("/reports", async (req, res) => {
+    try {
+        const { page = 1, limit = 50 } = req.query;
+        const skip = (page - 1) * limit;
+
+        const reports = await Report.find()
+            .populate("reporterId", "name email profilePhotos")
+            .populate("reportedId", "name email profilePhotos")
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(parseInt(limit));
+
+        const total = await Report.countDocuments();
+
+        res.json({
+            success: true,
+            reports,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / limit)
+            }
+        });
+    } catch (error) {
+        console.error("Error fetching reports:", error);
+        res.status(500).json({ success: false, message: "Failed to fetch reports" });
+    }
+});
+
 module.exports = router;

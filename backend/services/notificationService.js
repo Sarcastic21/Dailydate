@@ -48,6 +48,9 @@ async function createNotification(userId, type, title, body, data = {}) {
         });
         await notification.save();
 
+        // Increment User's unread count
+        await User.findByIdAndUpdate(userId, { $inc: { unreadNotificationCount: 1 } });
+
         // Always send FCM push if user has a token.
         // We do NOT rely on isOnline here because that flag has a race condition —
         // it stays true for a few seconds after the app is backgrounded/killed.
@@ -222,11 +225,16 @@ async function getUserNotifications(userId, page = 1, limit = 20) {
  */
 async function markNotificationAsRead(notificationId, userId) {
     try {
-        const result = await Notification.updateOne(
-            { _id: notificationId, userId },
-            { read: true }
-        );
-        return result.modifiedCount > 0;
+        const notif = await Notification.findOne({ _id: notificationId, userId });
+        if (!notif || notif.read) return false;
+
+        notif.read = true;
+        await notif.save();
+
+        // Decrement User's unread count
+        await User.findByIdAndUpdate(userId, { $inc: { unreadNotificationCount: -1 }, $min: { unreadNotificationCount: 0 } });
+        
+        return true;
     } catch (error) {
         console.error('[Notification] Error marking as read:', error);
         return false;
@@ -242,6 +250,10 @@ async function markAllNotificationsAsRead(userId) {
             { userId, read: false },
             { read: true }
         );
+        
+        // Reset User's unread count
+        await User.findByIdAndUpdate(userId, { unreadNotificationCount: 0 });
+        
         return result.modifiedCount;
     } catch (error) {
         console.error('[Notification] Error marking all as read:', error);

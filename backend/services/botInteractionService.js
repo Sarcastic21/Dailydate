@@ -339,7 +339,7 @@ const processMessageEngagement = async () => {
 
             // ── NEW: Ensure user has at least one view or like before messaging ──
             if ((user.stats?.profileViews || 0) === 0 && (user.stats?.totalLikes || 0) === 0) {
-                continue; 
+                continue;
             }
 
             const botGender = resolveBotGender(user);
