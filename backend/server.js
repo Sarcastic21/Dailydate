@@ -408,6 +408,6 @@ app.get("/health", (req, res) => {
   res.status(200).send("OK");
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT;
 // Listen on all interfaces so physical phones on LAN can reach your machine
 server.listen(PORT, "0.0.0.0", () => console.log(`🚀 Server running on port ${PORT} (0.0.0.0)`));

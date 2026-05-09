@@ -64,7 +64,7 @@ router.post("/create-payu-hash", auth, async (req, res) => {
         const isTest = process.env.PAYU_ENV === 'test';
         const payuUrl = isTest ? 'https://test.payu.in/_payment' : 'https://secure.payu.in/_payment';
 
-        const baseUrl = process.env.BACKEND_URL || 'https://dailydate.onrender.com';
+        const baseUrl = process.env.BACKEND_URL;
         const queryParam = platform === 'web' ? '?source=web' : '';
 
         res.json({
@@ -90,7 +90,7 @@ router.post("/create-payu-hash", auth, async (req, res) => {
 });
 
 router.all("/payu-success", async (req, res) => {
-    const frontEndUrl = process.env.FRONTEND_URL || 'https://dailydate.netlify.app';
+    const frontEndUrl = process.env.FRONTEND_URL;
     try {
         const payuData = req.method === 'POST' ? req.body : req.query;
         const txnid = payuData.txnid || req.query.txnid;
@@ -106,7 +106,7 @@ router.all("/payu-success", async (req, res) => {
 });
 
 router.all("/payu-failure", async (req, res) => {
-    const frontEndUrl = process.env.FRONTEND_URL || 'https://dailydate.netlify.app';
+    const frontEndUrl = process.env.FRONTEND_URL;
     res.redirect(`${frontEndUrl}/settings?payment=failed`);
 });
 
