@@ -69,6 +69,12 @@ mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log("✅ MongoDB connected"))
     .catch(err => console.error("❌ MongoDB error:", err));
 
+app.get("/", (req, res) => {
+  res.send("Backend is running 🚀");
+});
+app.get("/health", (req, res) => {
+  res.status(200).send("OK");
+});
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
@@ -401,12 +407,7 @@ process.on('unhandledRejection', (err) => {
         process.exit(1);
     });
 });
-app.get("/", (req, res) => {
-  res.send("Backend is running 🚀");
-});
-app.get("/health", (req, res) => {
-  res.status(200).send("OK");
-});
+
 
 const PORT = process.env.PORT;
 // Listen on all interfaces so physical phones on LAN can reach your machine
