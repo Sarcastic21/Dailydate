@@ -155,11 +155,11 @@ const scheduleInitialActivity = async (userId) => {
             });
         }
 
-        // Female user: 2–4 messages in 30 min window (starting after 15 min)
-        // Male user:   1–2 messages in 60 min window (starting after 30 min)
-        const msgCount = isFemale ? randInt(2, 4) : randInt(1, 2);
-        const msgWindowMin = isFemale ? 30 : 60;
-        const msgStartDelay = isFemale ? 15 : 30; // ── NEW: Grace period ──
+        // Female user: 1–2 messages in 24 hour window
+        // Male user:   1–2 messages in 24 hour window
+        const msgCount = randInt(1, 2);
+        const msgWindowMin = 1440; // 24 hours
+        const msgStartDelay = randInt(30, 60); // Start after 30-60 min
 
         for (let i = 0; i < msgCount; i++) {
             const bot = await findBot(user, botGender, []); // Bots for messages can overlap
@@ -208,36 +208,42 @@ const processOnlineEngagement = async () => {
             lastActive: { $gte: new Date(Date.now() - 3 * 60 * 60 * 1000) }
         });
 
-        for (const user of onlineUsers) {
+        console.log(`[OnlineEngagement] Processing ${onlineUsers.length} online users`);
+
+        // Batch Redis keys to reduce calls
+        const viewKeys = onlineUsers.map(u => `bot:online_view:${u._id}`);
+        const likeKeys = onlineUsers.map(u => `bot:online_like:${u._id}`);
+        
+        const viewKeyResults = await Promise.all(viewKeys.map(key => redisConnection.get(key)));
+        const likeKeyResults = await Promise.all(likeKeys.map(key => redisConnection.get(key)));
+
+        for (let i = 0; i < onlineUsers.length; i++) {
+            const user = onlineUsers[i];
             const botGender = resolveBotGender(user);
 
             // ── View ────────────────────────────────────────────────
-            const viewKey = `bot:online_view:${user._id}`;
-            if (!(await redisConnection.get(viewKey))) {
-                // Find a bot this user hasn't been viewed by recently
+            if (!viewKeyResults[i]) {
                 const bot = await findBot(user, botGender, []);
                 if (bot) {
                     const alreadyViewed = await hasBotViewedUser(bot._id, user._id);
                     if (!alreadyViewed) {
                         const delayMin = randInt(1, 10);
                         await botQueue.add('view', { userId: user._id, botId: bot._id, activityType: 'view' }, { delay: delayMin * 60000 });
-                        // Block next view for 1–10 min (same window)
-                        await redisConnection.setex(viewKey, randInt(1, 10) * 60, "true");
+                        await redisConnection.setex(viewKeys[i], randInt(1, 10) * 60, "true");
                         console.log(`[OnlineEngagement] View → user ${user._id} from bot ${bot._id} in ${delayMin}m`);
                     }
                 }
             }
 
             // ── Like ────────────────────────────────────────────────
-            const likeKey = `bot:online_like:${user._id}`;
-            if (!(await redisConnection.get(likeKey))) {
+            if (!likeKeyResults[i]) {
                 const bot = await findBot(user, botGender, []);
                 if (bot) {
                     const alreadyLiked = await hasBotLikedUser(bot._id, user._id);
                     if (!alreadyLiked) {
                         const delayMin = randInt(1, 10);
                         await botQueue.add('like', { userId: user._id, botId: bot._id, activityType: 'like' }, { delay: delayMin * 60000 });
-                        await redisConnection.setex(likeKey, randInt(1, 10) * 60, "true");
+                        await redisConnection.setex(likeKeys[i], randInt(1, 10) * 60, "true");
                         console.log(`[OnlineEngagement] Like → user ${user._id} from bot ${bot._id} in ${delayMin}m`);
                     }
                 }
@@ -262,50 +268,55 @@ const processOfflineEngagement = async () => {
             isOnline: false
         });
 
+        console.log(`[OfflineEngagement] Processing ${offlineUsers.length} offline users`);
+
+        // Filter users by offline time first
+        const eligibleUsers = [];
         for (const user of offlineUsers) {
             const lastActiveMs = user.lastActive ? user.lastActive.getTime() : 0;
             const hoursOffline = (Date.now() - lastActiveMs) / (1000 * 60 * 60);
+            if (hoursOffline <= 24) {
+                eligibleUsers.push({ user, hoursOffline });
+            }
+        }
 
-            // Stop engaging after 24 hours offline
-            if (hoursOffline > 24) continue;
+        // Batch Redis keys
+        const viewKeys = eligibleUsers.map(({ user }) => `bot:offline_view:${user._id}`);
+        const likeKeys = eligibleUsers.map(({ user }) => `bot:offline_like:${user._id}`);
+        
+        const viewKeyResults = await Promise.all(viewKeys.map(key => redisConnection.get(key)));
+        const likeKeyResults = await Promise.all(likeKeys.map(key => redisConnection.get(key)));
 
-            const isEarlyOffline = hoursOffline <= 3; // First 3 hours
+        for (let i = 0; i < eligibleUsers.length; i++) {
+            const { user, hoursOffline } = eligibleUsers[i];
+            const isEarlyOffline = hoursOffline <= 3;
             const botGender = resolveBotGender(user);
 
             // ── View ────────────────────────────────────────────────
-            // Early offline: 3–4 views per hour → gap = 60/3.5 ≈ 15–20 min
-            // Late offline:  1–3 views per 6hr  → gap = 360/2   ≈ 120–360 min
-            const viewKey = `bot:offline_view:${user._id}`;
-            if (!(await redisConnection.get(viewKey))) {
+            if (!viewKeyResults[i]) {
                 const bot = await findBot(user, botGender, []);
                 if (bot) {
                     const alreadyViewed = await hasBotViewedUser(bot._id, user._id);
                     if (!alreadyViewed) {
                         const delayMin = isEarlyOffline ? randInt(5, 15) : randInt(30, 60);
                         await botQueue.add('view', { userId: user._id, botId: bot._id, activityType: 'view' }, { delay: delayMin * 60000 });
-
-                        // Block window: early=15–20min, late=2–3hr
                         const blockMin = isEarlyOffline ? randInt(15, 20) : randInt(120, 180);
-                        await redisConnection.setex(viewKey, blockMin * 60, "true");
+                        await redisConnection.setex(viewKeys[i], blockMin * 60, "true");
                         console.log(`[OfflineEngagement] View → user ${user._id} (${hoursOffline.toFixed(1)}h offline) from bot ${bot._id} in ${delayMin}m`);
                     }
                 }
             }
 
             // ── Like ────────────────────────────────────────────────
-            // Early offline: 1–2 per hour → gap ≈ 30–60 min
-            // Late offline:  1–2 per 6hr  → gap ≈ 3–6 hr
-            const likeKey = `bot:offline_like:${user._id}`;
-            if (!(await redisConnection.get(likeKey))) {
+            if (!likeKeyResults[i]) {
                 const bot = await findBot(user, botGender, []);
                 if (bot) {
                     const alreadyLiked = await hasBotLikedUser(bot._id, user._id);
                     if (!alreadyLiked) {
                         const delayMin = isEarlyOffline ? randInt(10, 30) : randInt(60, 120);
                         await botQueue.add('like', { userId: user._id, botId: bot._id, activityType: 'like' }, { delay: delayMin * 60000 });
-
                         const blockMin = isEarlyOffline ? randInt(30, 60) : randInt(180, 360);
-                        await redisConnection.setex(likeKey, blockMin * 60, "true");
+                        await redisConnection.setex(likeKeys[i], blockMin * 60, "true");
                         console.log(`[OfflineEngagement] Like → user ${user._id} (${hoursOffline.toFixed(1)}h offline) from bot ${bot._id} in ${delayMin}m`);
                     }
                 }
@@ -327,17 +338,22 @@ const processMessageEngagement = async () => {
         const users = await User.find({
             userType: "real",
             isProfileComplete: true,
-            lastActive: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, // Active in last 24h
-            createdAt: { $lte: new Date(Date.now() - 60 * 60 * 1000) } // ── NEW: Account must be at least 1 hour old ──
+            lastActive: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+            createdAt: { $lte: new Date(Date.now() - 60 * 60 * 1000) }
         });
 
-        for (const user of users) {
-            const isFemale = String(user.gender || "").toLowerCase() === "female";
-            const msgKey = `bot:message:${user._id}`;
+        console.log(`[MessageEngagement] Processing ${users.length} users`);
 
-            if (await redisConnection.get(msgKey)) continue; // Still in cooldown
+        // Batch Redis keys
+        const msgKeys = users.map(u => `bot:message:${u._id}`);
+        const msgKeyResults = await Promise.all(msgKeys.map(key => redisConnection.get(key)));
 
-            // ── NEW: Ensure user has at least one view or like before messaging ──
+        for (let i = 0; i < users.length; i++) {
+            const user = users[i];
+            
+            if (msgKeyResults[i]) continue; // Still in 24-hour cooldown
+
+            // ── Ensure user has at least one view or like before messaging
             if ((user.stats?.profileViews || 0) === 0 && (user.stats?.totalLikes || 0) === 0) {
                 continue;
             }
@@ -347,9 +363,9 @@ const processMessageEngagement = async () => {
             if (!bot) continue;
 
             const alreadyMessaged = await hasBotMessagedUser(bot._id, user._id);
-            if (alreadyMessaged) continue; // Each bot only messages once
+            if (alreadyMessaged) continue;
 
-            const delayMin = isFemale ? randInt(2, 8) : randInt(5, 15);
+            const delayMin = randInt(5, 30);
             await botQueue.add('message', {
                 userId: user._id,
                 botId: bot._id,
@@ -357,13 +373,10 @@ const processMessageEngagement = async () => {
                 content: pick(GREETINGS)
             }, { delay: delayMin * 60000 });
 
-            // Cooldown until next message slot:
-            // Female: 30min / (2–4 msgs) ≈ 7–15 min gap
-            // Male:   60min / (1–2 msgs) ≈ 30–60 min gap
-            const blockMin = isFemale ? randInt(7, 15) : randInt(30, 60);
-            await redisConnection.setex(msgKey, blockMin * 60, "true");
+            // 24-hour cooldown (86400 seconds)
+            await redisConnection.setex(msgKeys[i], 86400, "true");
 
-            console.log(`[MessageEngagement] Message → user ${user._id} (${user.gender}) from bot ${bot._id} in ${delayMin}m, next in ${blockMin}m`);
+            console.log(`[MessageEngagement] Message → user ${user._id} from bot ${bot._id} in ${delayMin}m, 24h cooldown`);
         }
     } catch (error) {
         console.error("Error in processMessageEngagement:", error);
@@ -377,24 +390,32 @@ const updateBotOnlineStatus = async () => {
         const botUsers = await User.find({ userType: "bot" });
         if (botUsers.length === 0) return;
 
+        console.log(`[BotOnlineStatus] Processing ${botUsers.length} bots`);
+
         const hourOfDay = new Date().getHours();
         const isPeakHour = hourOfDay >= 12 && hourOfDay <= 19;
         const onlineProbability = isPeakHour ? 0.75 : 0.55;
 
-        const updatePromises = botUsers.map(async (bot) => {
-            const isOnline = bot.isOnline
-                ? Math.random() < 0.8         // Sticky: online bots tend to stay online
-                : Math.random() < onlineProbability;
+        // Process in batches to reduce memory pressure
+        const batchSize = 50;
+        for (let i = 0; i < botUsers.length; i += batchSize) {
+            const batch = botUsers.slice(i, i + batchSize);
+            const updatePromises = batch.map(async (bot) => {
+                const isOnline = bot.isOnline
+                    ? Math.random() < 0.8
+                    : Math.random() < onlineProbability;
 
-            return User.findByIdAndUpdate(bot._id, {
-                isOnline,
-                lastActive: isOnline
-                    ? new Date(Date.now() - Math.floor(Math.random() * 10 * 60 * 1000))
-                    : bot.lastActive
+                return User.findByIdAndUpdate(bot._id, {
+                    isOnline,
+                    lastActive: isOnline
+                        ? new Date(Date.now() - Math.floor(Math.random() * 10 * 60 * 1000))
+                        : bot.lastActive
+                });
             });
-        });
 
-        await Promise.all(updatePromises);
+            await Promise.all(updatePromises);
+        }
+
         console.log(`✅ Updated online status for ${botUsers.length} bots (peak=${isPeakHour})`);
     } catch (error) {
         console.error("❌ Error updating bot online status:", error);

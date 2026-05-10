@@ -5,28 +5,25 @@ const Redis = require('ioredis');
 const REDIS_URL = process.env.REDIS_URL;
 const redisConnection = new Redis(REDIS_URL, {
     maxRetriesPerRequest: null,
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+    lazyConnect: true,
 });
 
-// botQueue for handling immediate and delayed interactive events like views, likes, and messages
+// Single unified queue to reduce connection overhead
 const botQueue = new Queue('botQueue', {
     connection: redisConnection,
     skipVersionCheck: true,
     defaultJobOptions: {
-        removeOnComplete: { count: 100 }, // Keep only last 100 completed jobs
-        removeOnFail: { count: 50 }, // Keep only last 50 failed jobs
+        removeOnComplete: { count: 10, age: 3600 }, // Aggressive cleanup: keep only 10 jobs for 1 hour
+        removeOnFail: { count: 5, age: 3600 }, // Aggressive cleanup: keep only 5 failed jobs for 1 hour
         attempts: 2,
         backoff: { type: 'exponential', delay: 1000 }
+    },
+    limiter: {
+        max: 50, // Max 50 jobs per second
+        duration: 1000, // Per 1 second window
     }
 });
 
-// Cron queue for repetitive large checks
-const botCronQueue = new Queue('botCronQueue', {
-    connection: redisConnection,
-    skipVersionCheck: true,
-    defaultJobOptions: {
-        removeOnComplete: { count: 50 },
-        removeOnFail: { count: 20 }
-    }
-});
-
-module.exports = { botQueue, botCronQueue, redisConnection };
+module.exports = { botQueue, redisConnection };

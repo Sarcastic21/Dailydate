@@ -48,23 +48,23 @@ const runRedisCleanup = async () => {
         }
 
         // 3. Clean BullMQ old completed/failed jobs
-        const queues = ['botQueue', 'botCronQueue'];
+        const queues = ['botQueue']; // Only single queue now
         for (const q of queues) {
             const completedKey = `bull:${q}:completed`;
             const failedKey = `bull:${q}:failed`;
 
             const completedCount = await redisConnection.zcard(completedKey);
             checkedCount += completedCount;
-            if (completedCount > 100) {
-                await redisConnection.zremrangebyrank(completedKey, 0, completedCount - 101);
-                cleanedCount += (completedCount - 100);
+            if (completedCount > 10) { // Reduced from 100 to 10
+                await redisConnection.zremrangebyrank(completedKey, 0, completedCount - 11);
+                cleanedCount += (completedCount - 10);
             }
 
             const failedCount = await redisConnection.zcard(failedKey);
             checkedCount += failedCount;
-            if (failedCount > 50) {
-                await redisConnection.zremrangebyrank(failedKey, 0, failedCount - 51);
-                cleanedCount += (failedCount - 50);
+            if (failedCount > 5) { // Reduced from 50 to 5
+                await redisConnection.zremrangebyrank(failedKey, 0, failedCount - 6);
+                cleanedCount += (failedCount - 5);
             }
         }
 

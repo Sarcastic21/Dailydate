@@ -1,5 +1,5 @@
 const { Worker } = require('bullmq');
-const { redisConnection, botCronQueue, botQueue } = require('../queues/botQueue');
+const { redisConnection, botQueue } = require('../queues/botQueue');
 const { executeView, executeLike, executeMessage, processOnlineEngagement, processOfflineEngagement, processMessageEngagement, updateBotOnlineStatus } = require('../services/botInteractionService');
 const { accountDeletionJob } = require('../services/accountDeletionService');
 const User = require('../models/User');
@@ -29,59 +29,59 @@ const interactionWorker = new Worker('botQueue', async (job) => {
             await executeLike(user, { _id: botId });
         } else if (activityType === 'message') {
             await executeMessage(user, { _id: botId }, content);
+        } else if (activityType === 'onlineEngagement') {
+            await processOnlineEngagement();
+        } else if (activityType === 'offlineEngagement') {
+            await processOfflineEngagement();
+        } else if (activityType === 'messageEngagement') {
+            await processMessageEngagement();
+        } else if (activityType === 'botOnlineStatus') {
+            await updateBotOnlineStatus();
+        } else if (activityType === 'accountDeletion') {
+            await accountDeletionJob();
         }
     } catch (err) {
         console.error(`❌ Failed to execute ${activityType}:`, err);
         throw err;
     }
-}, { connection: redisConnection, concurrency: 50, skipVersionCheck: true }); // High concurrency for 1000+ users!
+}, { connection: redisConnection, concurrency: 10, skipVersionCheck: true }); // Reduced concurrency from 50 to 10
 
-// Worker for cron-like constant polling
-const cronWorker = new Worker('botCronQueue', async (job) => {
-    if (job.name === 'onlineEngagement') {
-        await processOnlineEngagement();
-    } else if (job.name === 'offlineEngagement') {
-        await processOfflineEngagement();
-    } else if (job.name === 'messageEngagement') {
-        await processMessageEngagement();
-    } else if (job.name === 'botOnlineStatus') {
-        await updateBotOnlineStatus();
-    } else if (job.name === 'accountDeletion') {
-        await accountDeletionJob();
-    }
-}, { connection: redisConnection, skipVersionCheck: true });
-
-// Setup the repeatable cron jobs natively using BullMQ
+// Setup the repeatable cron jobs natively using BullMQ (single queue)
 const setupCrons = async () => {
     try {
-        await botCronQueue.add('onlineEngagement', {}, {
-            repeat: { every: 60000 }, // Every 1 minute
+        // REDUCED FREQUENCY: Every 10 minutes instead of 1 minute
+        await botQueue.add('onlineEngagement', {}, {
+            repeat: { every: 600000 }, // Every 10 minutes (was 1 minute)
             jobId: 'onlineEngagementJob'
         });
 
-        await botCronQueue.add('offlineEngagement', {}, {
-            repeat: { every: 1800000 }, // Every 30 minutes
+        // REDUCED FREQUENCY: Every 1 hour instead of 30 minutes
+        await botQueue.add('offlineEngagement', {}, {
+            repeat: { every: 3600000 }, // Every 1 hour (was 30 minutes)
             jobId: 'offlineEngagementJob'
         });
 
-        await botCronQueue.add('botOnlineStatus', {}, {
+        // KEPT: Every 10 minutes
+        await botQueue.add('botOnlineStatus', {}, {
             repeat: { every: 600000 }, // Every 10 minutes
             jobId: 'botOnlineStatusJob'
         });
 
-        await botCronQueue.add('messageEngagement', {}, {
+        // KEPT: Every 10 minutes
+        await botQueue.add('messageEngagement', {}, {
             repeat: { every: 600000 }, // Every 10 minutes
             jobId: 'messageEngagementJob'
         });
 
-        await botCronQueue.add('accountDeletion', {}, {
+        // KEPT: 3 AM daily
+        await botQueue.add('accountDeletion', {}, {
             repeat: { pattern: '0 3 * * *' }, // 3 AM daily
             jobId: 'accountDeletionJob'
         });
 
-        console.log("🤖 BullMQ Workers Initialized: botQueue and botCronQueue deployed successfully!");
+        console.log("🤖 BullMQ Worker Initialized: Single botQueue with optimized cron frequencies!");
     } catch (err) {
-        console.error("Failed to inject cron jobs into botCronQueue", err);
+        console.error("Failed to inject cron jobs into botQueue", err);
     }
 }
 
@@ -106,13 +106,4 @@ interactionWorker.on('failed', async (job) => {
     }
 });
 
-// Clean up cron job instances immediately after completion
-cronWorker.on('completed', async (job) => {
-    try {
-        await job.remove();
-    } catch (e) {
-        // Ignore
-    }
-});
-
-module.exports = { interactionWorker, cronWorker };
+module.exports = { interactionWorker };
