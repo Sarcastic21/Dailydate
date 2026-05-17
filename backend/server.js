@@ -84,7 +84,6 @@ app.use("/api/support", supportRoutes);
 app.use("/api/imagekit", imagekitRoutes);
 app.use("/api", fcmRoutes);
 app.use("/api/notifications", notificationRoutes);
-app.use("/api/webPayment", require("./routes/webPayment"));
 app.use("/api/appPayment", require("./routes/appPayment"));
 app.use("/api/admin/auth", require("./routes/adminAuth"));
 app.use("/api/admin", adminRoutes);
