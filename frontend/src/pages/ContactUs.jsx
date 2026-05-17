@@ -56,15 +56,15 @@ const ContactUs = () => {
                 </div>
 
                 <div className="mt-20 p-12 rounded-[40px] border border-zinc-100 bg-orange-50/30">
-                    <h2 className="text-3xl font-black mb-4">Already a member?</h2>
-                    <p className="text-zinc-600 mb-8 max-w-md mx-auto">Log in to your account to submit a support request directly and track your ticket status.</p>
-                    <Link
-                        to="/login"
+                    <h2 className="text-3xl font-black mb-4">Need instant support?</h2>
+                    <p className="text-zinc-600 mb-8 max-w-md mx-auto">You can reach us through direct email or download our official app to access the in-app help center and chat with our support team.</p>
+                    <a
+                        href="/#download-app"
                         className="inline-flex items-center gap-3 bg-orange-500 text-white font-black px-10 py-4 rounded-2xl hover:scale-105 active:scale-95 transition-all shadow-xl shadow-orange-500/20"
                     >
-                        <span>Login to Support</span>
-                        <i className="fas fa-arrow-right text-xs"></i>
-                    </Link>
+                        <span>Download App for Support</span>
+                        <i className="fas fa-download text-xs"></i>
+                    </a>
                 </div>
             </div>
             <Footer />

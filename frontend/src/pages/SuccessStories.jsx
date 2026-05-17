@@ -135,9 +135,9 @@ const SuccessStories = () => {
                                     <p className="text-zinc-500 max-w-md mx-auto mb-10 text-lg">
                                         We are just getting started! Our first batch of success stories is coming very soon as more couples find their forever match.
                                     </p>
-                                    <Link to="/register" className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-10 py-5 rounded-full transition-all shadow-xl shadow-orange-500/20 text-lg inline-block">
-                                        Find Your Match Today
-                                    </Link>
+                                    <a href="/#download-app" className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-10 py-5 rounded-full transition-all shadow-xl shadow-orange-500/20 text-lg inline-block">
+                                        Download the App Today
+                                    </a>
                                 </div>
                             )}
                         </>

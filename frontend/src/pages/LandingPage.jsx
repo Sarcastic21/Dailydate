@@ -415,16 +415,16 @@ const PricingCard = ({ plan, popular, delay }) => {
                 ))}
             </ul>
 
-            <Link
-                to="/register"
+            <a
+                href="#download-app"
                 className={`block text-center py-4 rounded-2xl font-semibold text-sm tracking-wide
           transition-all duration-300 hover:scale-[1.02]
           ${popular
                         ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/40 hover:bg-orange-400'
                         : 'border-2 border-zinc-200 text-zinc-800 hover:border-orange-400 hover:text-orange-500 hover:bg-orange-50'}`}
             >
-                Get Started →
-            </Link>
+                Get Started on App →
+            </a>
         </div>
     );
 };
@@ -616,17 +616,15 @@ const LandingPage = () => {
                         </p>
 
                         <div className="flex flex-wrap gap-4 mb-10">
-                            <Link
-                                to="/login"
+                            <a
+                                href="#download-app"
                                 className="inline-flex items-center gap-3 bg-orange-500 hover:bg-orange-400
                            text-white font-semibold px-8 py-4 rounded-full transition-all
                            hover:-translate-y-1 hover:shadow-2xl hover:shadow-orange-500/40 text-sm"
                             >
-                                Login Now
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <path d="M5 12h14M12 5l7 7-7 7" />
-                                </svg>
-                            </Link>
+                                <i className="fab fa-google-play text-lg"></i>
+                                Download on Google Play
+                            </a>
                             <a
                                 href="#stories"
                                 className="inline-flex items-center gap-3 bg-white/5 hover:bg-white/10 text-white
@@ -731,13 +729,6 @@ const LandingPage = () => {
                                     <p className="text-lg font-black tracking-tight">Google Play</p>
                                 </div>
                             </a>
-                            <div className="flex items-center gap-4 bg-zinc-900/40 text-white/50 px-8 py-4 rounded-3xl border border-white/5 cursor-not-allowed">
-                                <i className="fab fa-apple text-3xl opacity-30"></i>
-                                <div className="text-left">
-                                    <p className="text-[10px] font-bold uppercase tracking-wider opacity-60">Coming soon</p>
-                                    <p className="text-lg font-black tracking-tight">App Store</p>
-                                </div>
-                            </div>
                         </div>
                     </div>
 
@@ -870,14 +861,14 @@ const LandingPage = () => {
                 )}
 
                 <div data-reveal className="max-w-[1400px] mx-auto px-8 lg:px-16 mt-12 text-center">
-                    <Link
-                        to="/register"
+                    <a
+                        href="#download-app"
                         className="inline-flex items-center gap-3 bg-orange-500 hover:bg-orange-400 text-white
                        font-semibold px-8 py-4 rounded-full transition-all
                        hover:-translate-y-1 hover:shadow-2xl hover:shadow-orange-500/40 text-sm"
                     >
-                        Find Your Match Today ✨
-                    </Link>
+                        Download the App Today ✨
+                    </a>
                 </div>
             </section>
 
@@ -943,13 +934,6 @@ const LandingPage = () => {
                                     <p className="font-bold text-base leading-tight">Google Play</p>
                                 </div>
                             </a>
-                            <div className="flex items-center gap-3 bg-zinc-900 text-zinc-500 px-6 py-3.5 rounded-2xl border border-white/5 cursor-not-allowed">
-                                <i className="fab fa-apple text-2xl opacity-40"></i>
-                                <div className="text-left">
-                                    <p className="text-[10px] text-zinc-600 font-bold uppercase">Coming soon</p>
-                                    <p className="font-bold text-zinc-500 text-base leading-tight">App Store</p>
-                                </div>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -1027,22 +1011,15 @@ const LandingPage = () => {
                     </p>
 
                     <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                        <Link
-                            to="/register"
+                        <a
+                            href="#download-app"
                             className="inline-flex items-center justify-center gap-3 bg-orange-500 hover:bg-orange-400
                          text-white font-semibold px-10 py-5 rounded-full transition-all
                          hover:-translate-y-1 hover:shadow-2xl hover:shadow-orange-500/30 text-base"
                         >
-                            Create Free Account ✨
-                        </Link>
-                        <Link
-                            to="/login"
-                            className="inline-flex items-center justify-center gap-3 bg-white/5 hover:bg-white/10
-                         text-white font-medium px-10 py-5 rounded-full border border-white/15
-                         hover:border-white/30 transition-all text-base"
-                        >
-                            Already a member? →
-                        </Link>
+                            <i className="fab fa-google-play text-xl"></i>
+                            Download App on Google Play ✨
+                        </a>
                     </div>
 
                     <p className="text-zinc-500 text-xs mt-6 tracking-wide">

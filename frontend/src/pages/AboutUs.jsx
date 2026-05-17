@@ -155,9 +155,9 @@ const AboutUs = () => {
                             Ready to find your <br className="hidden lg:block"/> person?
                         </h2>
                         <div className="flex flex-wrap justify-center gap-4">
-                            <Link to="/register" className="bg-zinc-950 text-white px-10 py-5 rounded-full font-bold hover:scale-105 transition-transform text-lg shadow-2xl">
-                                Join Daily Date Today
-                            </Link>
+                             <a href="/#download-app" className="bg-zinc-950 text-white px-10 py-5 rounded-full font-bold hover:scale-105 transition-transform text-lg shadow-2xl">
+                                 Download the App Today
+                             </a>
                         </div>
                     </div>
                     {/* Visual Flashes */}
