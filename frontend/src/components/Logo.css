@@ -1,0 +1,26 @@
+.logo-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-image {
+  object-fit: contain;
+  background-color: transparent;
+}
+
+/* For white background contexts */
+.logo-container.white-bg .logo-image {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+}
+
+/* For dark background contexts */
+.logo-container.dark-bg .logo-image {
+  filter: brightness(1.1) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+/* Hover effect */
+.logo-container:hover .logo-image {
+  transform: scale(1.05);
+  transition: transform 0.2s ease;
+}
