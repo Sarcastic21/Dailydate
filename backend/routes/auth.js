@@ -43,7 +43,7 @@ const resend = new Resend(process.env.RESEND_API_KEY || "re_ACNCXrd5_B5eN4mmKnFJ
 const sendOtpEmail = async (email, otp, type = "registration") => {
     const isReset = type === "reset";
     const mailOptions = {
-        from: 'DailyDate <onboarding@resend.dev>', // Resend free tier requirement
+        from: 'DailyDate <otp@dailydate.site>', // Customized with verified domain
         to: email,
         subject: isReset ? "DailyDate - Password Reset Code" : "DailyDate - Email Verification Code",
         html: `
