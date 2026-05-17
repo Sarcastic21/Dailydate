@@ -1,7 +1,7 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 const otpGenerator = require("otp-generator");
 const User = require("../models/User");
 const redisClient = require("../config/redis");
@@ -37,26 +37,13 @@ const normalizeIdentifier = (identifier) => {
 const generateToken = (userId) =>
     jwt.sign({ userId }, process.env.JWT_SECRET || "dailydate_secret", { expiresIn: "30d" });
 
-// Nodemailer transporter with enhanced timeout and logging
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-    },
-    tls: {
-        rejectUnauthorized: false
-    },
-    connectionTimeout: 20000, // Increased to 20s for Render
-    greetingTimeout: 15000,
-    socketTimeout: 30000,
-    logger: true, // Log to Render console
-    debug: true
-});
+// Resend configuration
+const resend = new Resend(process.env.RESEND_API_KEY || "re_ACNCXrd5_B5eN4mmKnFJovkK6KYc9UqU6");
+
 const sendOtpEmail = async (email, otp, type = "registration") => {
     const isReset = type === "reset";
     const mailOptions = {
-        from: `DailyDate <${process.env.EMAIL_USER}>`,
+        from: 'DailyDate <onboarding@resend.dev>', // Resend free tier requirement
         to: email,
         subject: isReset ? "DailyDate - Password Reset Code" : "DailyDate - Email Verification Code",
         html: `
@@ -93,7 +80,13 @@ const sendOtpEmail = async (email, otp, type = "registration") => {
             </div>
         `,
     };
-    await transporter.sendMail(mailOptions);
+    
+    const { data, error } = await resend.emails.send(mailOptions);
+    if (error) {
+        console.error("Resend API Error:", error);
+        throw new Error(error.message);
+    }
+    return data;
 };
 
 // ─── REGISTER (Send OTP Only) ──────────────────────────────
