@@ -93,6 +93,27 @@ app.use("/api/analytics", require("./routes/analytics"));
 
 app.get("/health", (req, res) => res.json({ status: "OK" }));
 
+app.get("/api/system/status", (req, res) => {
+    try {
+        const now = new Date();
+        const istTime = now.toLocaleTimeString("en-US", {
+            timeZone: "Asia/Kolkata",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false
+        });
+        
+        res.status(200).json({
+            status: "healthy",
+            database: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+            uptime: Math.floor(process.uptime()),
+            lastUpdated: istTime
+        });
+    } catch (err) {
+        res.status(500).json({ status: "error", error: err.message });
+    }
+});
+
 // ─── Socket.IO Real-time Status & Chat ──────────────────────
 const redisClient = require("./config/redis");
 const { createAdapter } = require("@socket.io/redis-adapter");
